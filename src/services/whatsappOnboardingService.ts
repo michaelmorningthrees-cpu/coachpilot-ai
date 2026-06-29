@@ -51,6 +51,18 @@ export async function exchangeEmbeddedSignupCode(code: string): Promise<string> 
     throw new Error('Missing WHATSAPP_APP_ID or WHATSAPP_APP_SECRET.');
   }
 
+  // Trim before use — a stray newline/space from copy-paste or transport breaks
+  // the exchange. Never log the full code, appSecret, or the resulting token.
+  const cleanCode = code.trim();
+
+  logger.info(
+    `[WA ONBOARDING] Code diagnostics appId=${appId} apiVersion=${API_VERSION} ` +
+      `codeLength=${cleanCode.length} codePrefix=${cleanCode.slice(0, 6)} ` +
+      `codeHasWhitespace=${/\s/.test(code)} ` +
+      `codeIncludesHash=${code.includes('#')} ` +
+      `codeIncludesPlus=${code.includes('+')}`,
+  );
+
   // Codes minted by the Facebook JS SDK FB.login popup (Embedded Signup with
   // response_type=code) are NOT bound to a developer redirect_uri. Meta's token
   // exchange must therefore OMIT redirect_uri entirely — sending BASE_URL or the
@@ -59,10 +71,13 @@ export async function exchangeEmbeddedSignupCode(code: string): Promise<string> 
   const params = new URLSearchParams({
     client_id: appId,
     client_secret: appSecret,
-    code,
+    code: cleanCode,
   });
 
-  logger.info('[WA ONBOARDING] Exchanging code with redirect_uri omitted');
+  logger.info(
+    '[WA ONBOARDING] Exchange request method=GET endpoint=/oauth/access_token ' +
+      'params=client_id,client_secret,code redirect_uri=omitted',
+  );
 
   const url = `https://graph.facebook.com/${API_VERSION}/oauth/access_token?${params.toString()}`;
   const response = await fetch(url, { method: 'GET' });
