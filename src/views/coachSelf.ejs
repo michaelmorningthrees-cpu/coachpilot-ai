@@ -77,49 +77,81 @@
     </div>
   </div>
 
-  <!-- WhatsApp Connection (coach-friendly self-connect) -->
-  <% var waConnected = coach.whatsapp && coach.whatsapp.phoneNumberId && coach.whatsapp.accessToken; %>
+  <!-- WhatsApp Connection (coach-friendly) -->
+  <%
+    var wa = coach.whatsapp || {};
+    var waConnected = Boolean(wa.phoneNumberId && wa.accessToken);
+    var warns = wa.setupWarnings || [];
+    var needsAttention = waConnected && (!wa.webhookSubscribed || !wa.phoneRegistered || warns.length > 0);
+    // ⭕ = not done yet, ✅ = ok, ⚠ = needs attention
+    function statusIcon(done) { return !waConnected ? '⭕' : (done ? '✅' : '⚠'); }
+  %>
   <div class="card">
     <h2>WhatsApp Connection</h2>
     <p class="mut" style="margin-top:0">
       Status:
-      <% if (waConnected) { %>
-        <span class="pill active">Connected</span>
-        <% if (coach.whatsapp.displayPhoneNumber) { %> · <span class="muted-code"><%= coach.whatsapp.displayPhoneNumber %></span><% } %>
-      <% } else { %>
+      <% if (!waConnected) { %>
         <span class="pill setup_pending">Not connected</span>
+      <% } else if (needsAttention) { %>
+        <span class="pill setup_pending">Needs attention</span>
+      <% } else { %>
+        <span class="pill active">Connected</span>
       <% } %>
+      <% if (waConnected && wa.displayPhoneNumber) { %> · <span class="muted-code"><%= wa.displayPhoneNumber %></span><% } %>
     </p>
 
-    <% if (waConnected) { %>
-      <% var wa = coach.whatsapp; var warns = wa.setupWarnings || []; %>
-      <ul style="list-style:none;padding:0;margin:8px 0;font-size:14px;line-height:1.9">
-        <li>WhatsApp Connected ✅</li>
-        <li>Token Validated <%= wa.tokenValidated ? '✅' : '⚠' %></li>
-        <li>Webhook Subscribed <%= wa.webhookSubscribed ? '✅' : '⚠' %></li>
-        <li>Phone Registered <%= wa.phoneRegistered ? '✅' : '⚠' %></li>
-      </ul>
-      <% if (!wa.webhookSubscribed) { %>
-        <div class="banner err">WhatsApp connected, but webhook subscription needs attention.</div>
-      <% } %>
-      <% if (warns.indexOf('PHONE_REGISTRATION_PIN_REQUIRED') !== -1) { %>
-        <div class="banner err">Phone registration PIN is required. Please ask CoachPilot support or the Meta setup flow for the PIN.</div>
-      <% } %>
-      <form action="/coach/whatsapp/retry-setup" method="post" class="actions">
-        <button type="submit" class="btn secondary">Retry WhatsApp setup</button>
-      </form>
+    <!-- Setup checklist -->
+    <ul style="list-style:none;padding:0;margin:10px 0;font-size:14px;line-height:2">
+      <li><%= waConnected ? '✅' : '⭕' %> WhatsApp connected</li>
+      <li><%= statusIcon(wa.tokenValidated) %> Token validated</li>
+      <li><%= statusIcon(wa.webhookSubscribed) %> Webhook subscribed</li>
+      <li><%= statusIcon(wa.phoneRegistered) %> Phone registered</li>
+    </ul>
+
+    <% if (waConnected && !wa.webhookSubscribed) { %>
+      <div class="banner err">WhatsApp connected, but the message webhook needs attention. Try “Retry setup” below or contact support.</div>
+    <% } %>
+    <% if (warns.indexOf('PHONE_REGISTRATION_PIN_REQUIRED') !== -1) { %>
+      <div class="banner err">Phone registration needs a 6-digit PIN. CoachPilot support will help you complete this step.</div>
     <% } %>
 
-    <% if (embedded) { %>
-      <p class="mut">Connect your WhatsApp Business account in a few clicks — no technical details needed.</p>
-      <div class="actions">
-        <button type="button" class="btn" onclick="launchWhatsAppSignup()">
-          <%= waConnected ? 'Reconnect WhatsApp' : 'Connect WhatsApp' %>
-        </button>
-        <span id="es-status" class="mut"></span>
-      </div>
+    <% if (!waConnected) { %>
+      <!-- Pilot: self-connect when available, otherwise guided support -->
+      <% if (embedded) { %>
+        <p class="mut">Connect your WhatsApp Business account in a few clicks — no technical details needed.</p>
+        <div class="actions">
+          <button type="button" class="btn" onclick="launchWhatsAppSignup()">Connect WhatsApp</button>
+          <span id="es-status" class="mut"></span>
+        </div>
+        <p class="mut" style="font-size:13px;margin-top:10px">
+          Prefer help? <a href="mailto:<%= supportEmail %>?subject=WhatsApp%20setup%20help">Request WhatsApp Setup Support</a>
+        </p>
+      <% } else { %>
+        <p class="mut">CoachPilot team will help you connect your WhatsApp Business account during pilot.</p>
+        <div class="actions">
+          <a class="btn" href="mailto:<%= supportEmail %>?subject=WhatsApp%20setup%20help"
+             onclick="var m=document.getElementById('wa-support-msg'); if(m){m.textContent='Please contact CoachPilot support with your WhatsApp Business number.';}">
+            Request WhatsApp Setup Support
+          </a>
+          <span id="wa-support-msg" class="mut"></span>
+        </div>
+      <% } %>
     <% } else { %>
-      <p class="mut">WhatsApp self-connect is not available yet. Please contact CoachPilot support.</p>
+      <!-- Connected: allow re-run of automated setup, and reconnect if available -->
+      <div class="actions">
+        <form action="/coach/whatsapp/retry-setup" method="post" style="display:inline">
+          <button type="submit" class="btn secondary">Retry setup</button>
+        </form>
+        <% if (embedded) { %>
+          <button type="button" class="btn ghost" onclick="launchWhatsAppSignup()">Reconnect WhatsApp</button>
+          <span id="es-status" class="mut"></span>
+        <% } %>
+      </div>
+      <% if (needsAttention) { %>
+        <p class="mut" style="font-size:13px;margin-top:10px">
+          Still stuck? <a href="mailto:<%= supportEmail %>?subject=WhatsApp%20setup%20help">Request WhatsApp Setup Support</a>
+        </p>
+      <% } %>
     <% } %>
 
     <details style="margin-top:18px">
@@ -130,11 +162,11 @@
           <div class="row">
             <div>
               <label for="phoneNumberId">Phone number ID</label>
-              <input id="phoneNumberId" name="phoneNumberId" value="<%= coach.whatsapp && coach.whatsapp.phoneNumberId ? coach.whatsapp.phoneNumberId : '' %>" />
+              <input id="phoneNumberId" name="phoneNumberId" value="<%= wa.phoneNumberId || '' %>" />
             </div>
             <div>
               <label for="displayPhoneNumber">Display phone number (optional)</label>
-              <input id="displayPhoneNumber" name="displayPhoneNumber" value="<%= coach.whatsapp && coach.whatsapp.displayPhoneNumber ? coach.whatsapp.displayPhoneNumber : '' %>" />
+              <input id="displayPhoneNumber" name="displayPhoneNumber" value="<%= wa.displayPhoneNumber || '' %>" />
             </div>
           </div>
           <label for="accessToken">Access token</label>

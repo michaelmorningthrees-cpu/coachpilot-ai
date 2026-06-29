@@ -166,6 +166,7 @@ router.get('/coach', requireCoach, (req: Request, res: Response) => {
     ready: isCoachReady(coach),
     workingHoursJson: JSON.stringify(coach.workingHours ?? {}, null, 2),
     embedded: getEmbeddedSignupConfig(),
+    supportEmail: process.env.SUPPORT_EMAIL?.trim() || 'support@coachpilot.ai',
     saved: req.query.saved === '1',
     changed: req.query.changed === '1',
   });
