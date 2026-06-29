@@ -1,0 +1,222 @@
+<%- include('partials/head', { title }) %>
+<%- include('partials/nav') %>
+<div class="wrap">
+  <h1><%= coach.name %></h1>
+  <p class="mut">
+    <a href="/admin">← Back</a> ·
+    <span class="muted-code"><%= coach.coachId %></span> ·
+    <span class="pill <%= coach.status %>"><%= coach.status %></span>
+    <% if (ready) { %><span class="mut"> · ready ✓</span><% } else { %><span class="mut"> · setup incomplete</span><% } %>
+  </p>
+
+  <% if (saved) { %>
+    <div class="banner ok">Saved.</div>
+  <% } %>
+
+  <!-- Profile -->
+  <form action="/admin/coaches/<%= encodeURIComponent(coach.coachId) %>" method="post">
+    <div class="card">
+      <h2>Profile</h2>
+      <div class="row">
+        <div>
+          <label for="name">Name</label>
+          <input id="name" name="name" value="<%= coach.name %>" />
+        </div>
+        <div>
+          <label for="sport">Sport</label>
+          <input id="sport" name="sport" value="<%= coach.sport %>" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="email">Email</label>
+          <input id="email" name="email" value="<%= coach.email %>" />
+        </div>
+        <div>
+          <label for="timezone">Timezone</label>
+          <input id="timezone" name="timezone" value="<%= coach.timezone %>" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="language">Default language</label>
+          <select id="language" name="language">
+            <option value="en" <%= coach.language === 'en' ? 'selected' : '' %>>English</option>
+            <option value="zh" <%= coach.language === 'zh' ? 'selected' : '' %>>中文 / 廣東話</option>
+          </select>
+        </div>
+        <div>
+          <label for="calendarId">Google Calendar ID</label>
+          <input id="calendarId" name="calendarId" value="<%= coach.calendar && coach.calendar.calendarId ? coach.calendar.calendarId : '' %>" />
+        </div>
+      </div>
+      <label for="workingHoursJson">Working hours (JSON)</label>
+      <textarea id="workingHoursJson" name="workingHoursJson"><%= workingHoursJson %></textarea>
+      <div class="actions">
+        <button type="submit">Save profile</button>
+      </div>
+    </div>
+  </form>
+
+  <!-- Google Calendar -->
+  <div class="card">
+    <h2>Google Calendar</h2>
+    <% if (coach.calendar && coach.calendar.serviceAccountMode === false && coach.calendar.refreshToken) { %>
+      <p class="mut">Connected via OAuth ✓ (calendar: <span class="muted-code"><%= coach.calendar.calendarId || 'primary' %></span>)</p>
+    <% } else { %>
+      <p class="mut">Using the shared service account. The coach can connect their own Google account:</p>
+    <% } %>
+    <div class="actions">
+      <a class="btn" href="/oauth/google/start?coachId=<%= encodeURIComponent(coach.coachId) %>">
+        <%= (coach.calendar && coach.calendar.refreshToken) ? 'Reconnect Google Calendar' : 'Connect Google Calendar' %>
+      </a>
+    </div>
+  </div>
+
+  <!-- WhatsApp -->
+  <div class="card">
+    <h2>WhatsApp</h2>
+    <% if (coach.whatsapp && coach.whatsapp.phoneNumberId && coach.whatsapp.accessToken) { %>
+      <p class="mut">Connected ✓ · phone number id: <span class="muted-code"><%= coach.whatsapp.phoneNumberId %></span>
+        <% if (coach.whatsapp.displayPhoneNumber) { %> · <%= coach.whatsapp.displayPhoneNumber %><% } %>
+      </p>
+    <% } else { %>
+      <p class="mut">Not connected yet.</p>
+    <% } %>
+
+    <h3 style="font-size:14px;color:var(--mut);margin-top:18px">Option A · Manual entry</h3>
+    <form action="/admin/coaches/<%= encodeURIComponent(coach.coachId) %>/whatsapp" method="post">
+      <div class="row">
+        <div>
+          <label for="phoneNumberId">Phone number ID</label>
+          <input id="phoneNumberId" name="phoneNumberId" value="<%= coach.whatsapp && coach.whatsapp.phoneNumberId ? coach.whatsapp.phoneNumberId : '' %>" />
+        </div>
+        <div>
+          <label for="displayPhoneNumber">Display phone number (optional)</label>
+          <input id="displayPhoneNumber" name="displayPhoneNumber" value="<%= coach.whatsapp && coach.whatsapp.displayPhoneNumber ? coach.whatsapp.displayPhoneNumber : '' %>" />
+        </div>
+      </div>
+      <label for="accessToken">Access token</label>
+      <input id="accessToken" name="accessToken" type="password" placeholder="<%= coach.whatsapp && coach.whatsapp.accessToken ? '•••••• (stored — re-enter to replace)' : 'Permanent or system-user token' %>" />
+      <div class="actions">
+        <button type="submit">Save WhatsApp</button>
+      </div>
+    </form>
+
+    <hr />
+
+    <h3 style="font-size:14px;color:var(--mut)">Option B · Embedded Signup</h3>
+    <% if (embedded) { %>
+      <p class="mut">Let the coach connect their WhatsApp Business account via Meta.</p>
+      <div class="actions">
+        <button type="button" class="btn secondary" onclick="launchWhatsAppSignup()">Connect with Facebook</button>
+        <span id="es-status" class="mut"></span>
+      </div>
+    <% } else { %>
+      <p class="mut">Embedded Signup is not configured. Set <span class="muted-code">WHATSAPP_APP_ID</span> and <span class="muted-code">WHATSAPP_CONFIG_ID</span> in .env to enable it.</p>
+    <% } %>
+  </div>
+
+  <!-- Coach login -->
+  <div class="card">
+    <h2>Coach login</h2>
+    <% if (typeof authError !== 'undefined' && authError) { %>
+      <div class="banner err"><%= authError %></div>
+    <% } %>
+    <% if (typeof tempPassword !== 'undefined' && tempPassword) { %>
+      <div class="banner ok">
+        Login created. Share these credentials with the coach — the password is shown <strong>once</strong>:<br/>
+        Email: <span class="muted-code"><%= coach.email %></span><br/>
+        Temporary password: <span class="muted-code"><%= tempPassword %></span><br/>
+        Login URL: <span class="muted-code">/coach/login</span> (they must change it on first login).
+      </div>
+    <% } %>
+    <% if (coach.authUid) { %>
+      <p class="mut">
+        Login is active for <span class="muted-code"><%= coach.email %></span>
+        <% if (coach.mustChangePassword) { %> · awaiting first password change<% } %>.
+      </p>
+    <% } else { %>
+      <p class="mut">No login yet. Create one to let this coach manage their own dashboard at <span class="muted-code">/coach/login</span>.</p>
+    <% } %>
+    <form action="/admin/coaches/<%= encodeURIComponent(coach.coachId) %>/auth" method="post" class="actions">
+      <button type="submit"><%= coach.authUid ? 'Reset temporary password' : 'Create coach login' %></button>
+    </form>
+  </div>
+
+  <!-- Status -->
+  <div class="card">
+    <h2>Status</h2>
+    <form action="/admin/coaches/<%= encodeURIComponent(coach.coachId) %>/status" method="post" class="actions">
+      <select name="status" style="max-width:220px">
+        <option value="active" <%= coach.status === 'active' ? 'selected' : '' %>>active</option>
+        <option value="inactive" <%= coach.status === 'inactive' ? 'selected' : '' %>>inactive</option>
+        <option value="setup_pending" <%= coach.status === 'setup_pending' ? 'selected' : '' %>>setup_pending</option>
+      </select>
+      <button type="submit">Update status</button>
+    </form>
+  </div>
+</div>
+
+<% if (embedded) { %>
+<script>
+  const ES_APP_ID = '<%= embedded.appId %>';
+  const ES_CONFIG_ID = '<%= embedded.configId %>';
+  const ES_VERSION = '<%= embedded.apiVersion %>';
+  const ES_COACH_ID = '<%= coach.coachId %>';
+  let waSessionData = {};
+
+  window.fbAsyncInit = function () {
+    FB.init({ appId: ES_APP_ID, autoLogAppEvents: true, xfbml: true, version: ES_VERSION });
+  };
+
+  // Capture phone_number_id / waba_id emitted by the Embedded Signup flow.
+  window.addEventListener('message', function (event) {
+    if (typeof event.origin !== 'string' || !event.origin.endsWith('facebook.com')) return;
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'WA_EMBEDDED_SIGNUP' && data.data) {
+        waSessionData = data.data;
+      }
+    } catch (e) { /* ignore non-JSON messages */ }
+  });
+
+  function setStatus(msg) { document.getElementById('es-status').textContent = msg; }
+
+  function launchWhatsAppSignup() {
+    if (typeof FB === 'undefined') { setStatus('Facebook SDK not loaded yet — try again.'); return; }
+    setStatus('Opening Meta…');
+    FB.login(function (response) {
+      if (response && response.authResponse && response.authResponse.code) {
+        submitEmbedded(response.authResponse.code);
+      } else {
+        setStatus('Signup cancelled.');
+      }
+    }, {
+      config_id: ES_CONFIG_ID,
+      response_type: 'code',
+      override_default_response_type: true,
+      extras: { setup: {} }
+    });
+  }
+
+  function submitEmbedded(code) {
+    setStatus('Connecting…');
+    fetch('/admin/coaches/' + encodeURIComponent(ES_COACH_ID) + '/whatsapp/embedded', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: code,
+        phoneNumberId: waSessionData.phone_number_id || '',
+        wabaId: waSessionData.waba_id || ''
+      })
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (res.ok) { setStatus('Connected ✓ reloading…'); location.href = location.pathname + '?saved=1'; }
+      else { setStatus('Failed: ' + (res.error || 'unknown error')); }
+    }).catch(function () { setStatus('Network error.'); });
+  }
+</script>
+<script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
+<% } %>
+</body>
+</html>

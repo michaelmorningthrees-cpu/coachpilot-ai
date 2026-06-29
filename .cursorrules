@@ -1,0 +1,134 @@
+# CoachPilot AI - Project Rules
+
+You are an expert backend engineer building "CoachPilot AI", a lightweight SaaS WhatsApp booking assistant for sports coaches.
+
+The system automates WhatsApp replies, checks calendar availability, and helps schedule coaching sessions.
+
+---
+
+## 🧠 Tech Stack
+
+- Backend: Node.js + TypeScript (Express.js)
+- APIs:
+  - Meta WhatsApp Cloud API
+  - OpenAI API (GPT-4o-mini)
+  - Google Calendar API
+- Database: Firebase / Firestore (optional for MVP)
+- Automation (optional): n8n for workflow prototyping
+
+---
+
+## 🧱 Architecture Principles
+
+- Keep MVP extremely simple (single-coach mode first)
+- Avoid over-engineering (no multi-tenant, no billing, no dashboard in MVP)
+- Focus on 3 core flows:
+  1. WhatsApp message receiving
+  2. AI intent detection
+  3. Calendar availability + booking
+
+---
+
+## 💻 Coding Guidelines
+
+- Write clean, modular, production-style TypeScript
+- Avoid `any` types strictly
+- Always use async/await for external APIs
+- Use `.env` for all secrets and API keys
+- Add proper try-catch error handling for all API calls
+- Log all:
+  - Incoming WhatsApp webhooks
+  - AI responses
+  - Calendar API calls
+  - Outgoing WhatsApp messages
+
+---
+
+## 🤖 AI Behaviour Rules
+
+Use OpenAI (GPT-4o-mini) to:
+
+- Detect intent from WhatsApp messages:
+  - check_availability
+  - create_booking
+  - reschedule_request
+- Extract structured JSON from natural language:
+  Example:
+  {
+    "intent": "check_availability",
+    "date": "Wednesday",
+    "time": "evening"
+  }
+
+---
+
+## 📅 Calendar Rules
+
+- Use Google Calendar API
+- Always check availability before booking
+- Use FreeBusy API for time slot checking
+- Prevent double booking
+
+---
+
+## 💬 WhatsApp Rules
+
+- WhatsApp is the ONLY user interface
+- All responses must be short, natural, and conversational
+- No technical language in user replies
+
+Example reply:
+"Wednesday 7–8pm available 👍 Want me to book it?"
+
+---
+
+## 🧪 Development Approach (IMPORTANT)
+
+Do NOT build full system at once.
+
+Build step-by-step in this order:
+
+### Step 1 — WhatsApp Webhook
+- Create Express.js server
+- Implement Meta WhatsApp Cloud API webhook verification (GET)
+- Handle incoming messages (POST)
+
+### Step 2 — AI Intent Parser
+- Create OpenAI service (GPT-4o-mini)
+- Convert WhatsApp messages into structured JSON intents
+
+### Step 3 — Calendar Integration
+- Integrate Google Calendar API
+- Check availability using FreeBusy API
+
+### Step 4 — WhatsApp Reply System
+- Send AI-generated responses back to user
+- Ensure natural conversational tone
+
+### Step 5 — Booking Confirmation Flow
+- Create calendar events when user confirms time
+- Send confirmation message to user
+
+---
+
+## 🚫 Forbidden in MVP
+
+- No payment system
+- No dashboard
+- No authentication system
+- No multi-coach support
+- No complex database design
+
+---
+
+## 🎯 MVP Goal
+
+Deliver a working system that:
+
+- Receives WhatsApp messages
+- Understands booking intent
+- Checks coach availability
+- Suggests time slots
+- Confirms booking automatically
+
+Success = A coach can reduce WhatsApp admin work by 70–90%.

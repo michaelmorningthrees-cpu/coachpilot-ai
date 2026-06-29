@@ -1,0 +1,204 @@
+<%- include('partials/head', { title }) %>
+<%- include('partials/navCoach') %>
+<div class="wrap">
+  <h1><%= coach.name %></h1>
+  <p class="mut">
+    <span class="pill <%= coach.status %>"><%= coach.status %></span>
+    <% if (ready) { %><span class="mut"> · ready ✓</span><% } else { %><span class="mut"> · setup incomplete</span><% } %>
+  </p>
+
+  <% if (changed) { %><div class="banner ok">Password updated.</div><% } %>
+  <% if (saved) { %><div class="banner ok">Saved.</div><% } %>
+
+  <!-- Profile -->
+  <form action="/coach/profile" method="post">
+    <div class="card">
+      <h2>Profile</h2>
+      <div class="row">
+        <div>
+          <label for="name">Name</label>
+          <input id="name" name="name" value="<%= coach.name %>" />
+        </div>
+        <div>
+          <label for="sport">Sport</label>
+          <input id="sport" name="sport" value="<%= coach.sport %>" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="timezone">Timezone</label>
+          <input id="timezone" name="timezone" value="<%= coach.timezone %>" />
+        </div>
+        <div>
+          <label for="language">Reply language</label>
+          <select id="language" name="language">
+            <option value="en" <%= coach.language === 'en' ? 'selected' : '' %>>English</option>
+            <option value="zh" <%= coach.language === 'zh' ? 'selected' : '' %>>中文 / 廣東話</option>
+          </select>
+        </div>
+      </div>
+      <label for="calendarId">Google Calendar ID</label>
+      <input id="calendarId" name="calendarId" value="<%= coach.calendar && coach.calendar.calendarId ? coach.calendar.calendarId : '' %>" />
+      <label for="workingHoursJson">Working hours (JSON)</label>
+      <textarea id="workingHoursJson" name="workingHoursJson"><%= workingHoursJson %></textarea>
+
+      <h3 style="font-size:14px;color:var(--mut);margin-top:18px">FAQ &amp; pricing (used for auto-replies)</h3>
+      <div class="row">
+        <div>
+          <label for="faqVenue">Venue / location</label>
+          <input id="faqVenue" name="faqVenue" value="<%= coach.faq && coach.faq.venue ? coach.faq.venue : '' %>" />
+        </div>
+        <div>
+          <label for="faqDuration">Session duration</label>
+          <input id="faqDuration" name="faqDuration" value="<%= coach.faq && coach.faq.duration ? coach.faq.duration : '' %>" />
+        </div>
+      </div>
+      <label for="pricingText">Pricing answer</label>
+      <input id="pricingText" name="pricingText" value="<%= coach.pricing && coach.pricing.text ? coach.pricing.text : '' %>" />
+
+      <div class="actions">
+        <button type="submit">Save profile</button>
+      </div>
+    </div>
+  </form>
+
+  <!-- Google Calendar -->
+  <div class="card">
+    <h2>Google Calendar</h2>
+    <% if (coach.calendar && coach.calendar.serviceAccountMode === false && coach.calendar.refreshToken) { %>
+      <p class="mut">Connected via your Google account ✓ (calendar: <span class="muted-code"><%= coach.calendar.calendarId || 'primary' %></span>)</p>
+    <% } else { %>
+      <p class="mut">Connect your own Google account so bookings land in your calendar:</p>
+    <% } %>
+    <div class="actions">
+      <a class="btn" href="/coach/google/start">
+        <%= (coach.calendar && coach.calendar.refreshToken) ? 'Reconnect Google Calendar' : 'Connect Google Calendar' %>
+      </a>
+    </div>
+  </div>
+
+  <!-- WhatsApp Connection (coach-friendly self-connect) -->
+  <% var waConnected = coach.whatsapp && coach.whatsapp.phoneNumberId && coach.whatsapp.accessToken; %>
+  <div class="card">
+    <h2>WhatsApp Connection</h2>
+    <p class="mut" style="margin-top:0">
+      Status:
+      <% if (waConnected) { %>
+        <span class="pill active">Connected</span>
+        <% if (coach.whatsapp.displayPhoneNumber) { %> · <span class="muted-code"><%= coach.whatsapp.displayPhoneNumber %></span><% } %>
+      <% } else { %>
+        <span class="pill setup_pending">Not connected</span>
+      <% } %>
+    </p>
+
+    <% if (embedded) { %>
+      <p class="mut">Connect your WhatsApp Business account in a few clicks — no technical details needed.</p>
+      <div class="actions">
+        <button type="button" class="btn" onclick="launchWhatsAppSignup()">
+          <%= waConnected ? 'Reconnect WhatsApp' : 'Connect WhatsApp' %>
+        </button>
+        <span id="es-status" class="mut"></span>
+      </div>
+    <% } else { %>
+      <p class="mut">WhatsApp self-connect is not available yet. Please contact CoachPilot support.</p>
+    <% } %>
+
+    <details style="margin-top:18px">
+      <summary style="cursor:pointer;color:var(--mut);font-size:13px;user-select:none">Advanced manual setup</summary>
+      <div style="margin-top:14px">
+        <p class="mut" style="font-size:13px">Only needed if you already have your own WhatsApp Cloud API credentials.</p>
+        <form action="/coach/whatsapp" method="post">
+          <div class="row">
+            <div>
+              <label for="phoneNumberId">Phone number ID</label>
+              <input id="phoneNumberId" name="phoneNumberId" value="<%= coach.whatsapp && coach.whatsapp.phoneNumberId ? coach.whatsapp.phoneNumberId : '' %>" />
+            </div>
+            <div>
+              <label for="displayPhoneNumber">Display phone number (optional)</label>
+              <input id="displayPhoneNumber" name="displayPhoneNumber" value="<%= coach.whatsapp && coach.whatsapp.displayPhoneNumber ? coach.whatsapp.displayPhoneNumber : '' %>" />
+            </div>
+          </div>
+          <label for="accessToken">Access token</label>
+          <input id="accessToken" name="accessToken" type="password" placeholder="<%= waConnected ? '•••••• (stored — re-enter to replace)' : 'Permanent or system-user token' %>" />
+          <div class="actions">
+            <button type="submit">Save WhatsApp</button>
+          </div>
+        </form>
+      </div>
+    </details>
+  </div>
+</div>
+
+<% if (embedded) { %>
+<script>
+  const ES_APP_ID = '<%= embedded.appId %>';
+  const ES_CONFIG_ID = '<%= embedded.configId %>';
+  const ES_VERSION = '<%= embedded.apiVersion %>';
+  const ES_COACH_NAME = <%- JSON.stringify(coach.name || '') %>;
+  const ES_DISPLAY_PHONE = <%- JSON.stringify((coach.whatsapp && coach.whatsapp.displayPhoneNumber) || '') %>;
+  let waSessionData = {};
+
+  window.fbAsyncInit = function () {
+    FB.init({ appId: ES_APP_ID, autoLogAppEvents: true, xfbml: true, version: ES_VERSION });
+  };
+
+  // Capture phone_number_id / waba_id emitted by the Embedded Signup flow.
+  window.addEventListener('message', function (event) {
+    if (typeof event.origin !== 'string' || !event.origin.endsWith('facebook.com')) return;
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'WA_EMBEDDED_SIGNUP' && data.data) {
+        waSessionData = data.data;
+      }
+    } catch (e) { /* ignore non-JSON messages */ }
+  });
+
+  function setStatus(msg) { document.getElementById('es-status').textContent = msg; }
+
+  function launchWhatsAppSignup() {
+    if (typeof FB === 'undefined') { setStatus('Facebook SDK not loaded yet — try again.'); return; }
+    console.log('[WHATSAPP EMBEDDED START]');
+    setStatus('Opening Meta…');
+
+    // Pre-fill the coach's business name and (if known) display phone number.
+    var setup = { business: { name: ES_COACH_NAME } };
+    if (ES_DISPLAY_PHONE) { setup.phone = { display_phone_number: ES_DISPLAY_PHONE }; }
+
+    FB.login(function (response) {
+      if (response && response.authResponse && response.authResponse.code) {
+        submitEmbedded(response.authResponse.code);
+      } else {
+        setStatus('Signup cancelled.');
+      }
+    }, {
+      config_id: ES_CONFIG_ID,
+      response_type: 'code',
+      override_default_response_type: true,
+      scope: 'whatsapp_business_management,whatsapp_business_messaging,business_management',
+      extras: {
+        setup: setup,
+        featureType: 'whatsapp_embedded_signup'
+      }
+    });
+  }
+
+  function submitEmbedded(code) {
+    setStatus('Connecting…');
+    fetch('/coach/whatsapp/embedded/callback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: code,
+        phoneNumberId: waSessionData.phone_number_id || '',
+        wabaId: waSessionData.waba_id || ''
+      })
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (res.ok) { setStatus('Connected ✓ reloading…'); location.href = '/coach?saved=1'; }
+      else { setStatus('Failed: ' + (res.error || 'unknown error')); }
+    }).catch(function () { setStatus('Network error.'); });
+  }
+</script>
+<script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
+<% } %>
+</body>
+</html>

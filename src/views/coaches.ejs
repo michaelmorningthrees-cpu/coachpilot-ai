@@ -1,0 +1,51 @@
+<%- include('partials/head', { title }) %>
+<%- include('partials/nav') %>
+<div class="wrap">
+  <h1>Coaches</h1>
+  <p class="mut">Manage coach profiles, Google Calendar and WhatsApp connections.</p>
+
+  <div class="card">
+    <% if (coaches.length === 0) { %>
+      <p class="mut">No coaches yet. <a href="/admin/coaches/new">Create the first coach →</a></p>
+    <% } else { %>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th>Sport</th><th>Status</th><th>Calendar</th><th>WhatsApp</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% coaches.forEach(function(c) { %>
+            <tr>
+              <td>
+                <strong><%= c.name %></strong><br />
+                <span class="muted-code"><%= c.coachId %></span>
+              </td>
+              <td><%= c.sport %></td>
+              <td><span class="pill <%= c.status %>"><%= c.status %></span></td>
+              <td>
+                <% if (c.calendar && c.calendar.serviceAccountMode === false && c.calendar.refreshToken) { %>
+                  <span class="mut">OAuth ✓</span>
+                <% } else if (c.calendar && c.calendar.calendarId) { %>
+                  <span class="mut">Service acct</span>
+                <% } else { %>
+                  <span class="mut">—</span>
+                <% } %>
+              </td>
+              <td>
+                <% if (c.whatsapp && c.whatsapp.phoneNumberId && c.whatsapp.accessToken) { %>
+                  <span class="mut">Connected ✓</span>
+                <% } else { %>
+                  <span class="mut">—</span>
+                <% } %>
+              </td>
+              <td><a href="/admin/coaches/<%= encodeURIComponent(c.coachId) %>">Manage →</a></td>
+            </tr>
+          <% }); %>
+        </tbody>
+      </table>
+    <% } %>
+  </div>
+</div>
+</body>
+</html>
