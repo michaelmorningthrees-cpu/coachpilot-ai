@@ -344,18 +344,30 @@ router.post(
   requireAdmin,
   async (req: Request, res: Response) => {
     const code = String(req.body.code ?? '').trim();
-    const phoneNumberId = String(req.body.phoneNumberId ?? '').trim();
-    const wabaId = String(req.body.wabaId ?? '').trim();
+    // Accept both snake_case (Embedded Signup) and camelCase (manual) keys.
+    const phoneNumberId = String(
+      req.body.phone_number_id ?? req.body.phoneNumberId ?? '',
+    ).trim();
+    const wabaId = String(req.body.waba_id ?? req.body.wabaId ?? '').trim();
 
-    if (!code || !phoneNumberId) {
-      res
-        .status(400)
-        .json({ ok: false, error: 'Missing code or phoneNumberId from Embedded Signup.' });
+    if (!code) {
+      res.status(400).json({ ok: false, error: 'Missing authorization code.' });
       return;
     }
 
     try {
+      // Exchange the code first so an invalid code surfaces clearly.
       const accessToken = await exchangeEmbeddedSignupCode(code);
+
+      if (!phoneNumberId) {
+        res.status(422).json({
+          ok: false,
+          error:
+            'WhatsApp authorized, but no phone number was detected. Please retry the connection.',
+        });
+        return;
+      }
+
       await saveCoachWhatsApp(req.params.id, {
         phoneNumberId,
         accessToken,

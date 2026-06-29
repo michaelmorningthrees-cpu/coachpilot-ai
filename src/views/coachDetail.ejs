@@ -177,21 +177,36 @@
   const ES_CONFIG_ID = '<%= embedded.configId %>';
   const ES_VERSION = '<%= embedded.apiVersion %>';
   const ES_COACH_ID = '<%= coach.coachId %>';
-  let waSessionData = {};
+  let latestPhoneNumberId = '';
+  let latestWabaId = '';
 
   window.fbAsyncInit = function () {
     FB.init({ appId: ES_APP_ID, autoLogAppEvents: true, xfbml: true, version: ES_VERSION });
   };
 
   // Capture phone_number_id / waba_id emitted by the Embedded Signup flow.
+  // event.data may be a plain object (most common) or a JSON string.
   window.addEventListener('message', function (event) {
     if (typeof event.origin !== 'string' || !event.origin.endsWith('facebook.com')) return;
-    try {
-      const data = JSON.parse(event.data);
-      if (data.type === 'WA_EMBEDDED_SIGNUP' && data.data) {
-        waSessionData = data.data;
-      }
-    } catch (e) { /* ignore non-JSON messages */ }
+
+    var eventData = event.data;
+    if (typeof eventData === 'string') {
+      try { eventData = JSON.parse(eventData); } catch (e) { return; }
+    }
+    if (!eventData || typeof eventData !== 'object') return;
+
+    console.log('[WA ES MESSAGE]', eventData);
+
+    if (eventData.type === 'WA_EMBEDDED_SIGNUP') {
+      var d = eventData.data || {};
+      latestPhoneNumberId =
+        d.phone_number_id || eventData.phone_number_id || latestPhoneNumberId;
+      latestWabaId = d.waba_id || eventData.waba_id || latestWabaId;
+      console.log('[WA ES IDS]', {
+        phone_number_id: latestPhoneNumberId,
+        waba_id: latestWabaId,
+      });
+    }
   });
 
   function setStatus(msg) { document.getElementById('es-status').textContent = msg; }
@@ -219,18 +234,30 @@
 
   function submitEmbedded(code) {
     setStatus('Connecting…');
+    // Send the code immediately; ids are best-effort. The backend exchanges the
+    // code first and returns a proper error only if it still cannot proceed.
     fetch('/admin/coaches/' + encodeURIComponent(ES_COACH_ID) + '/whatsapp/embedded', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         code: code,
-        phoneNumberId: waSessionData.phone_number_id || '',
-        wabaId: waSessionData.waba_id || ''
+        phone_number_id: latestPhoneNumberId || '',
+        waba_id: latestWabaId || ''
       })
-    }).then(function (r) { return r.json(); }).then(function (res) {
-      if (res.ok) { setStatus('Connected ✓ reloading…'); location.href = location.pathname + '?saved=1'; }
-      else { setStatus('Failed: ' + (res.error || 'unknown error')); }
-    }).catch(function () { setStatus('Network error.'); });
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; });
+    }).then(function (res) {
+      if (res && res.ok) {
+        setStatus('Connected ✓ reloading…');
+        location.href = location.pathname + '?saved=1';
+      } else {
+        console.error('[WA ES CALLBACK ERROR]', res && res.error);
+        setStatus('Failed: ' + ((res && res.error) || 'unknown error'));
+      }
+    }).catch(function (err) {
+      console.error('[WA ES FETCH ERROR]', err);
+      setStatus('Network error.');
+    });
   }
 </script>
 <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
