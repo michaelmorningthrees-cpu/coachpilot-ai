@@ -31,7 +31,7 @@ npm run typecheck
 
 # Health check
 curl http://localhost:3001/health
-# -> {"status":"ok","service":"CoachPilot AI","timestamp":"...","env":"development"}
+# -> {"status":"ok","service":"CoachPilot AI","environment":"development","baseUrl":"http://localhost:3001","timestamp":"..."}
 ```
 
 Requires **Node.js >= 20** (see `engines` in `package.json`).
@@ -43,12 +43,14 @@ Requires **Node.js >= 20** (see `engines` in `package.json`).
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `NODE_ENV` | recommended | `production` when deployed; `development` locally. |
+| `BASE_URL` | **yes (prod)** | Public base URL for all callbacks, e.g. `https://coachpilot-ai.onrender.com`. Must start with `https://` in production. Dev falls back to `http://localhost:<PORT>`. |
 | `PORT` | auto | Render/Railway inject this; the app reads `process.env.PORT`. |
-| `WHATSAPP_VERIFY_TOKEN` | yes | Webhook verification token; must match Meta dashboard. |
+| `WEBHOOK_VERIFY_TOKEN` | yes | Webhook verification token; must match Meta dashboard. (Legacy `WHATSAPP_VERIFY_TOKEN` still accepted as fallback.) |
 | `WHATSAPP_APP_SECRET` | yes | Meta App Secret; verifies `X-Hub-Signature-256`. |
 | `WHATSAPP_TOKEN` | yes | Meta access token (use a System User token in prod). |
 | `WHATSAPP_PHONE_NUMBER_ID` | yes | WhatsApp Business phone number ID. |
-| `WHATSAPP_API_VERSION` | optional | Graph API version (default `v22.0`). |
+| `WHATSAPP_API_VERSION` | optional | Graph API version (default `v25.0`). |
+| `META_APP_ACCESS_TOKEN` | optional | App access token for `debug_token` validation in post-signup setup. Falls back to `{APP_ID}|{APP_SECRET}`. |
 | `ENABLE_REAL_WHATSAPP` | yes (prod) | Set `true` to actually send replies via Meta. |
 | `OPENROUTER_API_KEY` | yes | OpenRouter key for the intent parser. |
 | `OPENROUTER_BASE_URL` | optional | Default `https://openrouter.ai/api/v1`. |
@@ -56,6 +58,11 @@ Requires **Node.js >= 20** (see `engines` in `package.json`).
 | `GOOGLE_CLIENT_EMAIL` | yes | Calendar service account email. |
 | `GOOGLE_PRIVATE_KEY` | yes | Service account private key (keep literal `\n`). |
 | `GOOGLE_CALENDAR_ID` | yes | Coach's calendar ID. |
+| `GOOGLE_OAUTH_CLIENT_ID` | for OAuth | Web OAuth client id (per-coach calendar connect). |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | for OAuth | Web OAuth client secret. |
+| `GOOGLE_OAUTH_REDIRECT_URI` | optional | Overrides the OAuth callback; derived from `BASE_URL` when unset. |
+| `WHATSAPP_APP_ID` | for Embedded Signup | Meta App ID (coach self-connect). |
+| `WHATSAPP_CONFIG_ID` | for Embedded Signup | Embedded Signup configuration id. |
 | `GOOGLE_CALENDAR_TIMEZONE` | optional | Default `Asia/Hong_Kong`. |
 | `COACH_TIMEZONE` | optional | Coach timezone for working hours (default `Asia/Hong_Kong`). |
 | `SESSION_DURATION_MINUTES` | optional | Session length (default `60`). |
@@ -70,10 +77,21 @@ Requires **Node.js >= 20** (see `engines` in `package.json`).
 
 - If `NODE_ENV=production` **and** `ALLOW_UNSIGNED_WEBHOOKS=true`, the app
   **refuses to start**.
+- In production, `BASE_URL` is **required**, must start with `https://`, and must
+  not point to `localhost`/`127.0.0.1`. A `GOOGLE_OAUTH_REDIRECT_URI` pointing at
+  localhost is also rejected.
 - In production, missing any of these **critical** vars aborts startup:
   `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`,
   `OPENROUTER_API_KEY`, `GOOGLE_CALENDAR_ID`, `FIREBASE_PROJECT_ID`.
   In development, the same vars only log a warning (degraded mode).
+
+**Callback URLs are derived from `BASE_URL`:**
+
+| Callback | URL |
+|----------|-----|
+| Meta webhook | `${BASE_URL}/webhook` |
+| Google OAuth | `${BASE_URL}/oauth/google/callback` (unless `GOOGLE_OAUTH_REDIRECT_URI` set) |
+| WhatsApp Embedded Signup | `${BASE_URL}/coach/whatsapp/embedded/callback` |
 
 > For multi-line keys (`GOOGLE_PRIVATE_KEY`, `FIREBASE_PRIVATE_KEY`), paste the
 > value with literal `\n` sequences and wrap in double quotes. The app converts
@@ -98,14 +116,25 @@ Requires **Node.js >= 20** (see `engines` in `package.json`).
    ```
 
 5. **Environment variables:** add every variable from the table above.
-   Set `NODE_ENV=production` and leave `ALLOW_UNSIGNED_WEBHOOKS` unset (or `false`).
+   Set `NODE_ENV=production`, `BASE_URL=https://coachpilot-ai.onrender.com`,
+   `ALLOW_UNSIGNED_WEBHOOKS=false`, `ENABLE_REAL_WHATSAPP=true`.
    Do **not** set `PORT` (Render injects it).
 6. **Health check path:** `/health`.
 7. Deploy. Your webhook URL will be:
 
    ```
-   https://your-app.onrender.com/webhook
+   https://coachpilot-ai.onrender.com/webhook
    ```
+
+### Exact Render env values (production)
+
+```
+NODE_ENV=production
+BASE_URL=https://coachpilot-ai.onrender.com
+ALLOW_UNSIGNED_WEBHOOKS=false
+ENABLE_REAL_WHATSAPP=true
+# GOOGLE_OAUTH_REDIRECT_URI is optional — derived from BASE_URL when unset
+```
 
 ---
 
@@ -132,12 +161,10 @@ In the **Meta App Dashboard → WhatsApp → Configuration → Webhook**:
 1. **Callback URL:**
 
    ```
-   https://your-domain.com/webhook
+   https://coachpilot-ai.onrender.com/webhook
    ```
 
-   (e.g. `https://your-app.onrender.com/webhook`)
-
-2. **Verify token:** the exact value of your `WHATSAPP_VERIFY_TOKEN`.
+2. **Verify token:** the exact value of your `WEBHOOK_VERIFY_TOKEN`.
    Meta sends a `GET /webhook` handshake; the server echoes `hub.challenge`
    when the token matches.
 
@@ -160,7 +187,7 @@ In the **Meta App Dashboard → WhatsApp → Configuration → Webhook**:
 curl https://your-domain.com/health
 
 # Webhook verification (simulating Meta's GET handshake)
-curl "https://your-domain.com/webhook?hub.mode=subscribe&hub.verify_token=YOUR_VERIFY_TOKEN&hub.challenge=12345"
+curl "https://coachpilot-ai.onrender.com/webhook?hub.mode=subscribe&hub.verify_token=YOUR_VERIFY_TOKEN&hub.challenge=12345"
 # -> 12345
 ```
 
@@ -169,7 +196,23 @@ Then send a WhatsApp message to your business number and watch the logs for
 
 ---
 
-## 6. Operational notes
+## 6. External callback registration (production)
+
+Register these exact URLs in the respective consoles:
+
+- **Meta webhook callback:** `https://coachpilot-ai.onrender.com/webhook`
+  (verify token = `WEBHOOK_VERIFY_TOKEN`; subscribe field `messages`)
+- **Google OAuth redirect URI** (Google Cloud Console → Credentials → OAuth
+  client → Authorized redirect URIs):
+  `https://coachpilot-ai.onrender.com/oauth/google/callback`
+- **WhatsApp Embedded Signup callback** (used by the coach dashboard front-end):
+  `https://coachpilot-ai.onrender.com/coach/whatsapp/embedded/callback`
+  (the Facebook Login for Business config must allow the app domain
+  `coachpilot-ai.onrender.com`)
+
+---
+
+## 7. Operational notes
 
 - **Graceful shutdown:** the server handles `SIGINT`/`SIGTERM`, stops accepting
   connections, drains in-flight requests, and exits (with a 10s force-exit

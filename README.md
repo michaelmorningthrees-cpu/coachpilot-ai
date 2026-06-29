@@ -40,7 +40,7 @@ cp .env.example .env
 
 ```
 PORT=3000
-WHATSAPP_VERIFY_TOKEN=your_verify_token_here
+WEBHOOK_VERIFY_TOKEN=your_verify_token_here
 ```
 
 ## Running
@@ -63,8 +63,8 @@ npm start
 ### `GET /webhook`
 
 Meta webhook verification handshake. Echoes back `hub.challenge` when
-`hub.mode=subscribe` and `hub.verify_token` matches `WHATSAPP_VERIFY_TOKEN`;
-otherwise returns `403`.
+`hub.mode=subscribe` and `hub.verify_token` matches `WEBHOOK_VERIFY_TOKEN`
+(legacy `WHATSAPP_VERIFY_TOKEN` is still accepted); otherwise returns `403`.
 
 ### `POST /webhook`
 
@@ -87,7 +87,7 @@ Simple liveness check returning `{ "status": "ok" }`.
 ## Quick Local Test
 
 ```bash
-# Verification (replace token with your WHATSAPP_VERIFY_TOKEN)
+# Verification (replace token with your WEBHOOK_VERIFY_TOKEN)
 curl "http://localhost:3000/webhook?hub.mode=subscribe&hub.verify_token=YOUR_TOKEN&hub.challenge=CHALLENGE123"
 
 # Simulate an incoming message

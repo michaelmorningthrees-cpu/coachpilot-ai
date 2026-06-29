@@ -7,6 +7,7 @@
  */
 
 import { logger } from '../services/logger';
+import { getBaseUrl } from './baseUrl';
 
 /**
  * Environment variables required for full production functionality.
@@ -37,6 +38,35 @@ export function runStartupChecks(): void {
     );
   }
 
+  // In production, callback URLs must be a real https host (never localhost).
+  if (isProduction) {
+    const baseUrl = process.env.BASE_URL?.trim();
+    if (!baseUrl) {
+      throw new Error(
+        'Refusing to start: BASE_URL is required in production ' +
+          '(e.g. https://coachpilot-ai.onrender.com).',
+      );
+    }
+    if (!baseUrl.startsWith('https://')) {
+      throw new Error(
+        `Refusing to start: BASE_URL must start with https:// in production (got "${baseUrl}").`,
+      );
+    }
+    if (/localhost|127\.0\.0\.1/i.test(baseUrl)) {
+      throw new Error(
+        'Refusing to start: BASE_URL must not point to localhost in production.',
+      );
+    }
+
+    const redirect = process.env.GOOGLE_OAUTH_REDIRECT_URI?.trim();
+    if (redirect && /localhost|127\.0\.0\.1/i.test(redirect)) {
+      throw new Error(
+        'Refusing to start: GOOGLE_OAUTH_REDIRECT_URI must not point to localhost ' +
+          'in production. Unset it to derive from BASE_URL.',
+      );
+    }
+  }
+
   const missing = CRITICAL_ENV_VARS.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
@@ -55,4 +85,5 @@ export function runStartupChecks(): void {
   }
 
   logger.info(`[STARTUP] Environment: ${nodeEnv}.`);
+  logger.info(`[STARTUP] Base URL: ${getBaseUrl()}`);
 }

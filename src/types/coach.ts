@@ -34,6 +34,16 @@ export interface CoachWhatsAppConfig {
   displayPhoneNumber?: string;
   /** ISO timestamp of the last successful WhatsApp connection. */
   connectedAt?: string;
+  /** 6-digit two-step PIN used to register the phone number (optional). */
+  registrationPin?: string;
+  /** Post-signup setup status (populated by metaWhatsAppSetupService). */
+  tokenValidated?: boolean;
+  webhookSubscribed?: boolean;
+  phoneRegistered?: boolean;
+  /** Machine-readable warnings, e.g. PHONE_REGISTRATION_PIN_REQUIRED. */
+  setupWarnings?: string[];
+  /** ISO timestamp of the last setup check / retry. */
+  lastSetupCheckAt?: string;
 }
 
 /** Free-form FAQ answers, keyed by topic (e.g. venue, duration). */

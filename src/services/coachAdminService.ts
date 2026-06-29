@@ -156,6 +156,31 @@ export async function linkCoachAuth(
   resetCoachCache();
 }
 
+/** Persists the post-signup WhatsApp setup status (webhook/phone/token). */
+export async function saveWhatsAppSetupStatus(
+  coachId: string,
+  status: {
+    tokenValidated: boolean;
+    webhookSubscribed: boolean;
+    phoneRegistered: boolean;
+    setupWarnings: string[];
+    lastSetupCheckAt: string;
+  },
+): Promise<void> {
+  await db()
+    .collection(COLLECTION)
+    .doc(coachId)
+    .update({
+      'whatsapp.tokenValidated': status.tokenValidated,
+      'whatsapp.webhookSubscribed': status.webhookSubscribed,
+      'whatsapp.phoneRegistered': status.phoneRegistered,
+      'whatsapp.setupWarnings': status.setupWarnings,
+      'whatsapp.lastSetupCheckAt': status.lastSetupCheckAt,
+      updatedAt: new Date().toISOString(),
+    });
+  resetCoachCache();
+}
+
 /** Clears the force-change-password flag after a successful change. */
 export async function clearMustChangePassword(coachId: string): Promise<void> {
   await db()

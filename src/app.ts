@@ -12,6 +12,7 @@ import adminRoutes from './routes/adminRoutes';
 import coachRoutes from './routes/coachRoutes';
 import { logger } from './services/logger';
 import { runStartupChecks } from './config/startupChecks';
+import { getBaseUrl } from './config/baseUrl';
 
 dotenv.config();
 
@@ -20,9 +21,10 @@ runStartupChecks();
 
 const PORT = Number(process.env.PORT ?? 3001);
 
-if (!process.env.WHATSAPP_VERIFY_TOKEN) {
+if (!process.env.WEBHOOK_VERIFY_TOKEN && !process.env.WHATSAPP_VERIFY_TOKEN) {
   logger.warn(
-    'WHATSAPP_VERIFY_TOKEN is not set. Webhook verification will fail until it is configured in .env.',
+    'WEBHOOK_VERIFY_TOKEN is not set (legacy WHATSAPP_VERIFY_TOKEN also absent). ' +
+      'Webhook verification will fail until it is configured.',
   );
 }
 
@@ -50,8 +52,9 @@ app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({
     status: 'ok',
     service: 'CoachPilot AI',
+    environment: process.env.NODE_ENV ?? 'development',
+    baseUrl: getBaseUrl(),
     timestamp: new Date().toISOString(),
-    env: process.env.NODE_ENV ?? 'development',
   });
 });
 

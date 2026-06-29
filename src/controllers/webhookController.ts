@@ -41,7 +41,19 @@ import { resolveCoachForWebhook } from '../services/coachResolverService';
 import { getFaqReply } from '../services/faqService';
 import { Coach } from '../types/coach';
 
-const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN ?? '';
+/**
+ * Resolves the webhook verify token at request time (never cached at module
+ * load, so it always reflects the current environment). Prefers the canonical
+ * WEBHOOK_VERIFY_TOKEN and falls back to the legacy WHATSAPP_VERIFY_TOKEN so
+ * existing deployments keep working.
+ */
+export function getVerifyToken(): string {
+  return (
+    process.env.WEBHOOK_VERIFY_TOKEN ??
+    process.env.WHATSAPP_VERIFY_TOKEN ??
+    ''
+  );
+}
 
 /**
  * GET /webhook — Meta webhook verification handshake.
@@ -49,7 +61,8 @@ const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN ?? '';
 export function handleVerification(req: Request, res: Response): void {
   try {
     const query = req.query as WebhookVerificationQuery;
-    const result = verifyWebhook(query, VERIFY_TOKEN);
+    const expectedToken = getVerifyToken();
+    const result = verifyWebhook(query, expectedToken);
 
     if (result.verified && result.challenge) {
       logger.info('Webhook verification succeeded.');
@@ -57,7 +70,19 @@ export function handleVerification(req: Request, res: Response): void {
       return;
     }
 
-    logger.warn('Webhook verification failed (mode/token mismatch).');
+    // Diagnostic that never leaks the secret value — only booleans/lengths.
+    const mode = query['hub.mode'];
+    const token = query['hub.verify_token'];
+    const challenge = query['hub.challenge'];
+    logger.warn(
+      '[WEBHOOK VERIFY] Failed (mode/token mismatch). ' +
+        `mode=${mode ?? 'none'} ` +
+        `modeOk=${mode === 'subscribe'} ` +
+        `expectedConfigured=${expectedToken ? 'yes' : 'no'} ` +
+        `tokenProvided=${token ? 'yes' : 'no'} ` +
+        `tokenMatches=${Boolean(expectedToken) && token === expectedToken} ` +
+        `challengePresent=${challenge ? 'yes' : 'no'}`,
+    );
     res.sendStatus(403);
   } catch (error) {
     logger.error('Unexpected error during webhook verification.', error);

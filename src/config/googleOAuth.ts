@@ -10,13 +10,14 @@
  * Env vars:
  *   - GOOGLE_OAUTH_CLIENT_ID
  *   - GOOGLE_OAUTH_CLIENT_SECRET
- *   - GOOGLE_OAUTH_REDIRECT_URI
+ *   - GOOGLE_OAUTH_REDIRECT_URI (optional; derived from BASE_URL when unset)
  *
  * Security: tokens are never logged or returned in responses.
  */
 
 import { google, calendar_v3, Auth } from 'googleapis';
 import { getFirestore } from './firebaseAdmin';
+import { getGoogleRedirectUri } from './baseUrl';
 // Use the OAuth2 client type as constructed by googleapis to avoid clashes
 // between the two bundled google-auth-library copies.
 type OAuth2Client = InstanceType<typeof google.auth.OAuth2>;
@@ -38,14 +39,15 @@ const COACHES_COLLECTION = 'coaches';
 export function getOAuthClient(): OAuth2Client {
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
-  const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI;
 
-  if (!clientId || !clientSecret || !redirectUri) {
+  if (!clientId || !clientSecret) {
     throw new Error(
-      'Google OAuth not configured: set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET and GOOGLE_OAUTH_REDIRECT_URI.',
+      'Google OAuth not configured: set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET.',
     );
   }
 
+  // Redirect URI is derived from BASE_URL unless GOOGLE_OAUTH_REDIRECT_URI is set.
+  const redirectUri = getGoogleRedirectUri();
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 

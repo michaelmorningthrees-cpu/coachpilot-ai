@@ -31,9 +31,11 @@ import {
   updateCoachProfile,
   setCoachStatus,
   saveCoachWhatsApp,
+  saveWhatsAppSetupStatus,
   linkCoachAuth,
   isCoachReady,
 } from '../services/coachAdminService';
+import { runWhatsAppSetup } from '../services/metaWhatsAppSetupService';
 import {
   upsertCoachAuthUser,
   generateTempPassword,
@@ -302,6 +304,38 @@ router.post('/admin/coaches/:id/whatsapp', requireAdmin, async (req: Request, re
     res.status(500).send('Failed to save WhatsApp config.');
   }
 });
+
+// --- WhatsApp: retry post-signup setup -------------------------------------
+
+router.post(
+  '/admin/coaches/:id/whatsapp/retry-setup',
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const coach = await getCoachByIdRaw(req.params.id);
+      if (!coach) {
+        res.status(404).send('Coach not found.');
+        return;
+      }
+      const wa = coach.whatsapp;
+      if (!wa?.accessToken || !wa?.phoneNumberId) {
+        res.status(400).send('WhatsApp is not connected yet — nothing to set up.');
+        return;
+      }
+      const status = await runWhatsAppSetup({
+        accessToken: wa.accessToken,
+        phoneNumberId: wa.phoneNumberId,
+        wabaId: wa.wabaId,
+        registrationPin: wa.registrationPin,
+      });
+      await saveWhatsAppSetupStatus(coach.coachId, status);
+      res.redirect(`/admin/coaches/${encodeURIComponent(req.params.id)}?saved=1`);
+    } catch (error) {
+      logger.error('[ADMIN] Retry WhatsApp setup failed.', error);
+      res.status(500).send('Failed to retry WhatsApp setup.');
+    }
+  },
+);
 
 // --- WhatsApp: Embedded Signup (JSON from the browser SDK) ------------------
 

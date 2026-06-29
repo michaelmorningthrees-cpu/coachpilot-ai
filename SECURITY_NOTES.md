@@ -12,7 +12,7 @@ before going to production:**
 | `GOOGLE_PRIVATE_KEY` / service account | Google Cloud Console → IAM → Service Accounts → Keys | Delete the exposed key; generate a new JSON key. Consider rotating the whole service account if unsure. |
 | `WHATSAPP_TOKEN` | Meta App Dashboard → WhatsApp → API Setup | Regenerate the access token (use a System User token for production). |
 | `WHATSAPP_APP_SECRET` | Meta App Dashboard → Settings → Basic | Reset if it was ever exposed. |
-| `WHATSAPP_VERIFY_TOKEN` | Your own value (Meta webhook config) | Pick a new random string and update both sides. |
+| `WEBHOOK_VERIFY_TOKEN` | Your own value (Meta webhook config) | Pick a new random string and update both sides. |
 
 ## Secret handling rules
 

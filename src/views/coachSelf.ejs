@@ -91,6 +91,25 @@
       <% } %>
     </p>
 
+    <% if (waConnected) { %>
+      <% var wa = coach.whatsapp; var warns = wa.setupWarnings || []; %>
+      <ul style="list-style:none;padding:0;margin:8px 0;font-size:14px;line-height:1.9">
+        <li>WhatsApp Connected ✅</li>
+        <li>Token Validated <%= wa.tokenValidated ? '✅' : '⚠' %></li>
+        <li>Webhook Subscribed <%= wa.webhookSubscribed ? '✅' : '⚠' %></li>
+        <li>Phone Registered <%= wa.phoneRegistered ? '✅' : '⚠' %></li>
+      </ul>
+      <% if (!wa.webhookSubscribed) { %>
+        <div class="banner err">WhatsApp connected, but webhook subscription needs attention.</div>
+      <% } %>
+      <% if (warns.indexOf('PHONE_REGISTRATION_PIN_REQUIRED') !== -1) { %>
+        <div class="banner err">Phone registration PIN is required. Please ask CoachPilot support or the Meta setup flow for the PIN.</div>
+      <% } %>
+      <form action="/coach/whatsapp/retry-setup" method="post" class="actions">
+        <button type="submit" class="btn secondary">Retry WhatsApp setup</button>
+      </form>
+    <% } %>
+
     <% if (embedded) { %>
       <p class="mut">Connect your WhatsApp Business account in a few clicks — no technical details needed.</p>
       <div class="actions">

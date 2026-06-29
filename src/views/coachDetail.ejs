@@ -80,6 +80,19 @@
       <p class="mut">Connected ✓ · phone number id: <span class="muted-code"><%= coach.whatsapp.phoneNumberId %></span>
         <% if (coach.whatsapp.displayPhoneNumber) { %> · <%= coach.whatsapp.displayPhoneNumber %><% } %>
       </p>
+      <% var wa = coach.whatsapp; var warns = wa.setupWarnings || []; %>
+      <ul style="list-style:none;padding:0;margin:8px 0;font-size:14px;line-height:1.9">
+        <li>WhatsApp Connected ✅</li>
+        <li>Token Validated <%= wa.tokenValidated ? '✅' : '⚠' %></li>
+        <li>Webhook Subscribed <%= wa.webhookSubscribed ? '✅' : '⚠' %></li>
+        <li>Phone Registered <%= wa.phoneRegistered ? '✅' : '⚠' %></li>
+      </ul>
+      <% if (warns.length) { %>
+        <p class="mut" style="font-size:13px">Warnings: <span class="muted-code"><%= warns.join(', ') %></span></p>
+      <% } %>
+      <form action="/admin/coaches/<%= encodeURIComponent(coach.coachId) %>/whatsapp/retry-setup" method="post" class="actions">
+        <button type="submit" class="btn secondary">Retry WhatsApp setup</button>
+      </form>
     <% } else { %>
       <p class="mut">Not connected yet.</p>
     <% } %>

@@ -34,9 +34,11 @@ import { CoachFaq, CoachPricing } from '../types/coach';
 import {
   updateCoachProfile,
   saveCoachWhatsApp,
+  saveWhatsAppSetupStatus,
   clearMustChangePassword,
   isCoachReady,
 } from '../services/coachAdminService';
+import { runWhatsAppSetup } from '../services/metaWhatsAppSetupService';
 import { parseWorkingHours } from '../services/coachConfigService';
 import {
   getEmbeddedSignupConfig,
@@ -256,6 +258,16 @@ router.post(
       });
       logger.info(`[WHATSAPP EMBEDDED CONNECTED] coach=${coach.coachId}`);
 
+      // Best-effort post-signup automation (token / webhook / phone). Never
+      // blocks the response — warnings are surfaced on the dashboard.
+      const status = await runWhatsAppSetup({
+        accessToken,
+        phoneNumberId,
+        wabaId: wabaId || undefined,
+        registrationPin: coach.whatsapp?.registrationPin,
+      });
+      await saveWhatsAppSetupStatus(coach.coachId, status);
+
       res.json({ ok: true });
     } catch (error) {
       logger.error('[COACH] Embedded Signup failed.', error);
@@ -263,6 +275,30 @@ router.post(
     }
   },
 );
+
+// --- Retry WhatsApp setup (own) --------------------------------------------
+
+router.post('/coach/whatsapp/retry-setup', requireCoach, async (req: Request, res: Response) => {
+  const coach = req.coach!;
+  const wa = coach.whatsapp;
+  if (!wa?.accessToken || !wa?.phoneNumberId) {
+    res.status(400).send('WhatsApp is not connected yet — nothing to set up.');
+    return;
+  }
+  try {
+    const status = await runWhatsAppSetup({
+      accessToken: wa.accessToken,
+      phoneNumberId: wa.phoneNumberId,
+      wabaId: wa.wabaId,
+      registrationPin: wa.registrationPin,
+    });
+    await saveWhatsAppSetupStatus(coach.coachId, status);
+    res.redirect('/coach?saved=1');
+  } catch (error) {
+    logger.error('[COACH] Retry WhatsApp setup failed.', error);
+    res.status(500).send('Failed to retry WhatsApp setup.');
+  }
+});
 
 // --- Google Calendar OAuth (own coachId from session) ----------------------
 
