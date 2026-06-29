@@ -181,6 +181,24 @@ export async function saveWhatsAppSetupStatus(
   resetCoachCache();
 }
 
+/**
+ * Saves (or clears) the coach's WhatsApp registration PIN. The PIN is write-only
+ * from the UI: it is stored but never rendered or logged back.
+ */
+export async function saveCoachRegistrationPin(
+  coachId: string,
+  pin: string,
+): Promise<void> {
+  await db()
+    .collection(COLLECTION)
+    .doc(coachId)
+    .update({
+      'whatsapp.registrationPin': pin,
+      updatedAt: new Date().toISOString(),
+    });
+  resetCoachCache();
+}
+
 /** Clears the force-change-password flag after a successful change. */
 export async function clearMustChangePassword(coachId: string): Promise<void> {
   await db()

@@ -12,6 +12,7 @@ import { Router, Request, Response } from 'express';
 import { logger } from '../services/logger';
 import {
   generateAuthUrl,
+  parseOAuthState,
   exchangeCodeForTokens,
   saveCoachOAuthTokens,
 } from '../config/googleOAuth';
@@ -61,50 +62,58 @@ router.get('/oauth/google/start', async (req: Request, res: Response) => {
 });
 
 router.get('/oauth/google/callback', async (req: Request, res: Response) => {
+  const rawState = (req.query.state as string | undefined)?.trim() ?? '';
+  const { origin, coachId } = parseOAuthState(rawState);
+
+  // Coach-portal flows always return to the dashboard with a status flag;
+  // admin/legacy flows keep the standalone HTML page.
+  const fail = (httpStatus: number, title: string, message: string): void => {
+    if (origin === 'coach') {
+      res.redirect('/coach?google=failed');
+      return;
+    }
+    res.status(httpStatus).send(htmlPage(title, message));
+  };
+
   try {
     const code = req.query.code as string | undefined;
-    const coachId = (req.query.state as string | undefined)?.trim();
     const oauthError = req.query.error as string | undefined;
 
     if (oauthError) {
       logger.warn(`[OAUTH CALLBACK] Google returned error=${oauthError}.`);
-      res
-        .status(400)
-        .send(htmlPage('Authorization cancelled', 'Google authorization was not completed.'));
+      fail(400, 'Authorization cancelled', 'Google authorization was not completed.');
       return;
     }
 
     if (!code || !coachId) {
-      res
-        .status(400)
-        .send(htmlPage('Invalid callback', 'Missing authorization code or state.'));
+      fail(400, 'Invalid callback', 'Missing authorization code or state.');
       return;
     }
 
     const coach = await getCoachByIdRaw(coachId);
     if (!coach) {
       logger.warn(`[OAUTH CALLBACK] Unknown coachId=${coachId} in state.`);
-      res.status(404).send(htmlPage('Unknown coach', 'No coach found for that id.'));
+      fail(404, 'Unknown coach', 'No coach found for that id.');
       return;
     }
 
     const tokens = await exchangeCodeForTokens(code);
     if (!tokens.accessToken) {
       logger.error(`[OAUTH CALLBACK] No access token returned for coach=${coachId}.`);
-      res
-        .status(502)
-        .send(htmlPage('OAuth error', 'Google did not return an access token.'));
+      fail(502, 'OAuth error', 'Google did not return an access token.');
       return;
     }
 
     const saved = await saveCoachOAuthTokens(coach, tokens);
     if (!saved) {
-      res
-        .status(500)
-        .send(htmlPage('OAuth error', 'Could not save Google Calendar connection.'));
+      fail(500, 'OAuth error', 'Could not save Google Calendar connection.');
       return;
     }
 
+    if (origin === 'coach') {
+      res.redirect('/coach?google=connected');
+      return;
+    }
     res
       .status(200)
       .send(
@@ -115,9 +124,7 @@ router.get('/oauth/google/callback', async (req: Request, res: Response) => {
       );
   } catch (error) {
     logger.error('[OAUTH CALLBACK] Token exchange failed.', error);
-    res
-      .status(500)
-      .send(htmlPage('OAuth error', 'Could not complete Google authorization.'));
+    fail(500, 'OAuth error', 'Could not complete Google authorization.');
   }
 });
 

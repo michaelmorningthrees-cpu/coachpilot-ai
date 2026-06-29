@@ -55,6 +55,36 @@ export function getCalendarClientForCoach(coach: Coach): calendar_v3.Calendar {
   return getCalendarClient();
 }
 
+export interface CalendarOption {
+  id: string;
+  summary: string;
+  primary: boolean;
+}
+
+/**
+ * Lists the calendars the coach can write to (OAuth mode only). Returns an
+ * empty array if the coach is not OAuth-connected or the API call fails.
+ */
+export async function listCoachCalendars(coach: Coach): Promise<CalendarOption[]> {
+  if (!(coach.calendar.serviceAccountMode === false && coach.calendar.refreshToken)) {
+    return [];
+  }
+  try {
+    const client = buildOAuthCalendarClient(coach);
+    const res = await client.calendarList.list({ maxResults: 100, showHidden: false });
+    return (res.data.items ?? [])
+      .filter((c) => c.id && (c.accessRole === 'owner' || c.accessRole === 'writer'))
+      .map((c) => ({
+        id: c.id as string,
+        summary: c.summaryOverride || c.summary || (c.id as string),
+        primary: Boolean(c.primary),
+      }));
+  } catch (error) {
+    logger.warn(`[CALENDAR] Failed to list calendars for coach=${coach.coachId}.`);
+    return [];
+  }
+}
+
 interface BusyInterval {
   start: DateTime;
   end: DateTime;

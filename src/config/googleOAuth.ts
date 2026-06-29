@@ -51,19 +51,44 @@ export function getOAuthClient(): OAuth2Client {
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
+export type OAuthOrigin = 'coach' | 'admin';
+
 /**
- * Returns the Google consent URL for a coach. The coachId is carried in the
- * `state` param and validated on callback.
+ * Returns the Google consent URL for a coach. The coachId and the flow origin
+ * (coach portal vs admin dashboard) are carried in the `state` param so the
+ * callback can redirect appropriately.
  */
-export function generateAuthUrl(coachId: string): string {
+export function generateAuthUrl(
+  coachId: string,
+  origin: OAuthOrigin = 'admin',
+): string {
   const client = getOAuthClient();
   return client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent', // force a refresh_token on every connect
     scope: OAUTH_SCOPES,
-    state: coachId,
+    state: `${origin}:${coachId}`,
     include_granted_scopes: true,
   });
+}
+
+/**
+ * Parses the OAuth `state` back into origin + coachId. Falls back to treating
+ * the whole value as a coachId with admin origin (legacy links).
+ */
+export function parseOAuthState(state: string): {
+  origin: OAuthOrigin;
+  coachId: string;
+} {
+  const idx = state.indexOf(':');
+  if (idx === -1) {
+    return { origin: 'admin', coachId: state };
+  }
+  const origin = state.slice(0, idx);
+  return {
+    origin: origin === 'coach' ? 'coach' : 'admin',
+    coachId: state.slice(idx + 1),
+  };
 }
 
 export interface ExchangedTokens {

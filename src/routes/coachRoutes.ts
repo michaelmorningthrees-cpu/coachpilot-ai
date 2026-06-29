@@ -8,7 +8,9 @@
  *   POST /coach/change-password    set new password
  *   GET  /coach                    own dashboard (only their own data)
  *   POST /coach/profile            update own profile / hours / FAQ / pricing
+ *   POST /coach/calendar           select which calendar to use (own)
  *   POST /coach/whatsapp           manual WhatsApp config (own)
+ *   POST /coach/whatsapp/pin       save registration PIN (own, write-only)
  *   POST /coach/whatsapp/embedded  Embedded Signup result (own, JSON)
  *   GET  /coach/google/start       begin Google Calendar OAuth (own coachId)
  *
@@ -35,9 +37,11 @@ import {
   updateCoachProfile,
   saveCoachWhatsApp,
   saveWhatsAppSetupStatus,
+  saveCoachRegistrationPin,
   clearMustChangePassword,
   isCoachReady,
 } from '../services/coachAdminService';
+import { listCoachCalendars } from '../services/googleCalendarService';
 import { runWhatsAppSetup } from '../services/metaWhatsAppSetupService';
 import { parseWorkingHours } from '../services/coachConfigService';
 import {
@@ -158,17 +162,37 @@ router.post('/coach/change-password', requireCoach, async (req: Request, res: Re
 
 // --- Dashboard -------------------------------------------------------------
 
-router.get('/coach', requireCoach, (req: Request, res: Response) => {
+router.get('/coach', requireCoach, async (req: Request, res: Response) => {
   const coach = req.coach!;
+
+  // Only OAuth-connected coaches get a calendar picker; ignore failures so the
+  // dashboard always renders.
+  const calendars = await listCoachCalendars(coach);
+
+  const ready = isCoachReady(coach);
   res.render('coachSelf', {
     title: coach.name,
     coach,
-    ready: isCoachReady(coach),
+    ready,
+    isActive: coach.status === 'active',
+    calendars,
     workingHoursJson: JSON.stringify(coach.workingHours ?? {}, null, 2),
     embedded: getEmbeddedSignupConfig(),
     supportEmail: process.env.SUPPORT_EMAIL?.trim() || 'support@coachpilot.ai',
     saved: req.query.saved === '1',
     changed: req.query.changed === '1',
+    googleStatus:
+      req.query.google === 'connected'
+        ? 'connected'
+        : req.query.google === 'failed'
+          ? 'failed'
+          : null,
+    whatsappStatus:
+      req.query.whatsapp === 'connected'
+        ? 'connected'
+        : req.query.whatsapp === 'failed'
+          ? 'failed'
+          : null,
   });
 });
 
@@ -202,6 +226,25 @@ router.post('/coach/profile', requireCoach, async (req: Request, res: Response) 
   } catch (error) {
     logger.error('[COACH] Failed to update own profile.', error);
     res.status(500).send('Failed to save profile.');
+  }
+});
+
+// --- Calendar selection (own) ----------------------------------------------
+
+router.post('/coach/calendar', requireCoach, async (req: Request, res: Response) => {
+  const coach = req.coach!;
+  const calendarId = String(req.body.calendarId ?? '').trim();
+  if (!calendarId) {
+    res.redirect('/coach');
+    return;
+  }
+  try {
+    await updateCoachProfile(coach.coachId, { calendarId });
+    logger.info(`[COACH] Calendar selection saved coach=${coach.coachId}.`);
+    res.redirect('/coach?saved=1');
+  } catch (error) {
+    logger.error('[COACH] Failed to save calendar selection.', error);
+    res.status(500).send('Failed to save calendar selection.');
   }
 });
 
@@ -277,6 +320,22 @@ router.post(
   },
 );
 
+// --- WhatsApp registration PIN (own, write-only) ---------------------------
+
+router.post('/coach/whatsapp/pin', requireCoach, async (req: Request, res: Response) => {
+  const coach = req.coach!;
+  const pin = String(req.body.registrationPin ?? '').trim();
+  try {
+    // The PIN value itself is never logged.
+    await saveCoachRegistrationPin(coach.coachId, pin);
+    logger.info(`[COACH] Registration PIN updated coach=${coach.coachId}.`);
+    res.redirect('/coach?saved=1');
+  } catch (error) {
+    logger.error('[COACH] Failed to save registration PIN.', error);
+    res.status(500).send('Failed to save registration PIN.');
+  }
+});
+
 // --- Retry WhatsApp setup (own) --------------------------------------------
 
 router.post('/coach/whatsapp/retry-setup', requireCoach, async (req: Request, res: Response) => {
@@ -306,7 +365,7 @@ router.post('/coach/whatsapp/retry-setup', requireCoach, async (req: Request, re
 router.get('/coach/google/start', requireCoach, (req: Request, res: Response) => {
   const coach = req.coach!;
   try {
-    res.redirect(generateAuthUrl(coach.coachId));
+    res.redirect(generateAuthUrl(coach.coachId, 'coach'));
   } catch (error) {
     logger.error('[COACH] Failed to start Google OAuth.', error);
     res.status(500).send('Google OAuth is not configured.');

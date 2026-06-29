@@ -7,8 +7,13 @@
     <% if (ready) { %><span class="mut"> · ready ✓</span><% } else { %><span class="mut"> · setup incomplete</span><% } %>
   </p>
 
+  <% if (isActive && ready) { %><div class="banner ok">CoachPilot AI is ready 🚀</div><% } %>
   <% if (changed) { %><div class="banner ok">Password updated.</div><% } %>
   <% if (saved) { %><div class="banner ok">Saved.</div><% } %>
+  <% if (googleStatus === 'connected') { %><div class="banner ok">Google Calendar connected successfully.</div><% } %>
+  <% if (googleStatus === 'failed') { %><div class="banner err">We couldn’t connect your Google Calendar. Please try again.</div><% } %>
+  <% if (whatsappStatus === 'connected') { %><div class="banner ok">WhatsApp connected successfully.</div><% } %>
+  <% if (whatsappStatus === 'failed') { %><div class="banner err">We couldn’t connect WhatsApp. Please try again or contact support.</div><% } %>
 
   <!-- Profile -->
   <form action="/coach/profile" method="post">
@@ -63,18 +68,40 @@
   </form>
 
   <!-- Google Calendar -->
+  <%
+    var googleConnected = coach.calendar && coach.calendar.serviceAccountMode === false && coach.calendar.refreshToken;
+    var selectedCalendarId = (coach.calendar && coach.calendar.calendarId) || 'primary';
+  %>
   <div class="card">
     <h2>Google Calendar</h2>
-    <% if (coach.calendar && coach.calendar.serviceAccountMode === false && coach.calendar.refreshToken) { %>
-      <p class="mut">Connected via your Google account ✓ (calendar: <span class="muted-code"><%= coach.calendar.calendarId || 'primary' %></span>)</p>
+    <% if (googleConnected) { %>
+      <p class="mut">Connected via your Google account ✓</p>
     <% } else { %>
       <p class="mut">Connect your own Google account so bookings land in your calendar:</p>
     <% } %>
     <div class="actions">
       <a class="btn" href="/coach/google/start">
-        <%= (coach.calendar && coach.calendar.refreshToken) ? 'Reconnect Google Calendar' : 'Connect Google Calendar' %>
+        <%= googleConnected ? 'Reconnect Google Calendar' : 'Connect Google Calendar' %>
       </a>
     </div>
+
+    <% if (googleConnected && calendars && calendars.length) { %>
+      <form action="/coach/calendar" method="post" style="margin-top:16px">
+        <label for="calendarChoice">Calendar to use</label>
+        <select id="calendarChoice" name="calendarId">
+          <% calendars.forEach(function (c) { %>
+            <option value="<%= c.id %>" <%= c.id === selectedCalendarId ? 'selected' : '' %>>
+              <%= c.summary %><%= c.primary ? ' (primary)' : '' %>
+            </option>
+          <% }) %>
+        </select>
+        <div class="actions">
+          <button type="submit" class="btn secondary">Save calendar</button>
+        </div>
+      </form>
+    <% } else if (googleConnected) { %>
+      <p class="mut" style="font-size:13px;margin-top:12px">Bookings go to your <strong>primary</strong> calendar.</p>
+    <% } %>
   </div>
 
   <!-- WhatsApp Connection (coach-friendly) -->
@@ -120,7 +147,7 @@
       <% if (embedded) { %>
         <p class="mut">Connect your WhatsApp Business account in a few clicks — no technical details needed.</p>
         <div class="actions">
-          <button type="button" class="btn" onclick="launchWhatsAppSignup()">Connect WhatsApp</button>
+          <button type="button" class="btn" onclick="launchWhatsAppSignup()">Connect WhatsApp Business</button>
           <span id="es-status" class="mut"></span>
         </div>
         <p class="mut" style="font-size:13px;margin-top:10px">
@@ -143,7 +170,7 @@
           <button type="submit" class="btn secondary">Retry setup</button>
         </form>
         <% if (embedded) { %>
-          <button type="button" class="btn ghost" onclick="launchWhatsAppSignup()">Reconnect WhatsApp</button>
+          <button type="button" class="btn ghost" onclick="launchWhatsAppSignup()">Reconnect WhatsApp Business</button>
           <span id="es-status" class="mut"></span>
         <% } %>
       </div>
@@ -173,6 +200,16 @@
           <input id="accessToken" name="accessToken" type="password" placeholder="<%= waConnected ? '•••••• (stored — re-enter to replace)' : 'Permanent or system-user token' %>" />
           <div class="actions">
             <button type="submit">Save WhatsApp</button>
+          </div>
+        </form>
+
+        <form action="/coach/whatsapp/pin" method="post" style="margin-top:18px">
+          <label for="registrationPin">Registration PIN (optional)</label>
+          <input id="registrationPin" name="registrationPin" type="password" autocomplete="off"
+                 placeholder="<%= (wa.registrationPin) ? '•••••• (stored — re-enter to replace)' : '6-digit phone registration PIN' %>" />
+          <p class="mut" style="font-size:12px;margin:6px 0 0">Used to register your number automatically. Stored securely and never shown again.</p>
+          <div class="actions">
+            <button type="submit" class="secondary">Save PIN</button>
           </div>
         </form>
       </div>
@@ -244,9 +281,9 @@
         wabaId: waSessionData.waba_id || ''
       })
     }).then(function (r) { return r.json(); }).then(function (res) {
-      if (res.ok) { setStatus('Connected ✓ reloading…'); location.href = '/coach?saved=1'; }
-      else { setStatus('Failed: ' + (res.error || 'unknown error')); }
-    }).catch(function () { setStatus('Network error.'); });
+      if (res.ok) { setStatus('Connected ✓ reloading…'); location.href = '/coach?whatsapp=connected'; }
+      else { setStatus('Failed.'); location.href = '/coach?whatsapp=failed'; }
+    }).catch(function () { location.href = '/coach?whatsapp=failed'; });
   }
 </script>
 <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
