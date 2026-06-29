@@ -106,8 +106,14 @@ Requires **Node.js >= 20** (see `engines` in `package.json`).
 3. **Build command:**
 
    ```
-   npm install && npm run build
+   npm ci --include=dev && npm run build
    ```
+
+   > `--include=dev` is required: `typescript` and the `@types/*` packages live in
+   > `devDependencies`. With Render's default `NODE_ENV=production` they would be
+   > skipped, and `npx tsc` would then fetch the latest TypeScript from the
+   > registry — which rejects the deprecated `node10` resolution and fails the
+   > build before any application code is compiled.
 
 4. **Start command:**
 
