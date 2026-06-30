@@ -17,6 +17,7 @@ import { parseIntent } from '../services/openaiIntentParser';
 import {
   checkAvailability,
   createBooking,
+  cancelBooking,
   buildBookingEventTitle,
   getCalendarClientForCoach,
 } from '../services/googleCalendarService';
@@ -31,7 +32,6 @@ import {
   detectLanguage,
   getContext,
   updateContext,
-  clearLastSuggestedSlot,
 } from '../services/conversationContextService';
 import {
   isDuplicateMessage,
@@ -308,6 +308,40 @@ function isConfirmation(text: string): boolean {
 }
 
 /**
+ * Detects a cancellation request as a keyword fallback, in case the model does
+ * not classify it as `cancel_booking` (e.g. "取消", "唔約喇", "cancel").
+ */
+function isCancellation(text: string): boolean {
+  if (/\b(cancel|delete|remove)\b/i.test(text)) {
+    return true;
+  }
+  return /(取消|唔約|唔想約|唔去喇|cancel)/.test(text);
+}
+
+/**
+ * Detects a bare greeting as a keyword fallback so "hello" never falls into the
+ * booking flow even if the model misclassifies it.
+ */
+function isGreeting(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (/^(hi+|hello+|hey+|yo|good (morning|afternoon|evening))\b/.test(t)) {
+    return true;
+  }
+  return /^(你好|哈囉|哈佬|喂|早晨|早安|您好)/.test(text.trim());
+}
+
+/**
+ * Detects "what/when did I book" style questions as a fallback, so a phrase
+ * like "我宜家book左邊日" routes to check_my_booking instead of new_booking.
+ */
+function isCheckMyBooking(text: string): boolean {
+  if (/(查預約|睇預約|我book咗|我約咗|我有冇(預約|約))/.test(text)) {
+    return true;
+  }
+  return /(邊一?日|幾時|幾點)/.test(text) && /(book|預約|約)/i.test(text);
+}
+
+/**
  * "Which day and time?" prompt used when we cannot resolve a concrete slot.
  */
 function askForDayTime(language: 'zh' | 'en'): string {
@@ -341,9 +375,20 @@ async function bookSlot(
   );
 
   if (booking.success) {
-    await clearLastSuggestedSlot(coach.coachId, from);
+    // Remember the created event so a later "取消" / "cancel" can undo it,
+    // and clear the pending suggestion in the same write.
     await updateContext(coach.coachId, from, {
-      lastIntent: 'create_booking',
+      lastIntent: 'new_booking',
+      lastSuggestedSlot: null,
+      lastBooking: booking.eventId
+        ? {
+            eventId: booking.eventId,
+            startISO,
+            endISO,
+            displayTextEn: label.en,
+            displayTextZh: label.zh,
+          }
+        : null,
       language,
     });
     return language === 'zh'
@@ -388,85 +433,196 @@ async function buildReply(
     coach.timezone,
   );
 
-  // 1) The student named a specific time — either asking if it is free
-  //    (check_availability) or asking to book it (create_booking).
-  if (
-    requestedSlot &&
-    (intent.intent === 'check_availability' ||
-      intent.intent === 'create_booking')
-  ) {
-    const { startISO, endISO } = requestedSlot;
-
-    if (
-      !isWithinWorkingHours(coach.workingHours, coach.timezone, startISO, endISO)
-    ) {
-      logger.info(
-        `[WORKING HOURS] Rejected out-of-hours request coach=${coach.coachId} slot=${startISO}`,
-      );
-      return describeWorkingWindow(
-        coach.workingHours,
-        coach.timezone,
-        startISO,
-        lang,
-      );
-    }
-
-    const result = await checkAvailability(
-      startISO,
-      endISO,
-      calendarId,
-      calendarClient,
+  const logRoute = (route: string): void =>
+    logger.info(
+      `[ROUTE] coach=${coach.coachId} intent=${intent.intent} route=${route}`,
     );
 
-    if (!result.available) {
+  // 1) Greeting / small talk — never start a booking flow, and ignore any
+  //    stale pending slot (the latest message wins).
+  if (intent.intent === 'greeting' || isGreeting(text)) {
+    logRoute('greeting');
+    await updateContext(coach.coachId, from, {
+      lastIntent: 'greeting',
+      language: lang,
+    });
+    return lang === 'zh'
+      ? '你好 👋 想預約、查預約，定取消預約？'
+      : 'Hi 👋 would you like to book, check, or cancel a session?';
+  }
+
+  // 2) Check my booking — answer from the booking we remember (Phase 1: no
+  //    full Calendar lookup yet). Overrides any stale booking flow.
+  if (intent.intent === 'check_my_booking' || isCheckMyBooking(text)) {
+    logRoute('check_my_booking');
+    const booked = context?.lastBooking ?? null;
+    await updateContext(coach.coachId, from, {
+      lastIntent: 'check_my_booking',
+      language: lang,
+    });
+    if (booked) {
+      return lang === 'zh'
+        ? `你預約咗 ${booked.displayTextZh} 🏀`
+        : `You're booked for ${booked.displayTextEn} 🏀`;
+    }
+    return lang === 'zh'
+      ? '我暫時搵唔到你嘅預約。想預約嗎？'
+      : "I can't find a booking for you yet. Want to book one?";
+  }
+
+  // 3) Cancel — undo the remembered booking. Overrides any stale booking flow.
+  if (intent.intent === 'cancel_booking' || isCancellation(text)) {
+    logRoute('cancel_booking');
+    const booked = context?.lastBooking ?? null;
+    if (!booked) {
       await updateContext(coach.coachId, from, {
-        lastIntent: intent.intent,
+        lastIntent: 'cancel_booking',
         language: lang,
       });
       return lang === 'zh'
-        ? '嗰個時段滿咗 😅 要唔要睇下第個時間？'
-        : 'That time looks full 😅 want me to check another time?';
+        ? '我暫時搵唔到可取消嘅預約。'
+        : "I can't find a booking to cancel.";
     }
 
-    const displayTextEn = formatSlotLabel(startISO, coach.timezone);
-    const displayTextZh = formatSlotLabelZh(startISO, coach.timezone);
+    const result = await cancelBooking(booked.eventId, calendarId, calendarClient);
+    if (result.success) {
+      await updateContext(coach.coachId, from, {
+        lastIntent: 'cancel_booking',
+        lastBooking: null,
+        language: lang,
+      });
+      logger.info(
+        `[BOOKING CANCELLED] coach=${coach.coachId} phone=${maskPhone(from)} event=${booked.eventId}`,
+      );
+      return lang === 'zh'
+        ? `好 👍 已幫你取消${booked.displayTextZh}嘅預約。`
+        : `Done 👍 cancelled your booking for ${booked.displayTextEn}.`;
+    }
+    return lang === 'zh'
+      ? '唔好意思,暫時取消唔到 😅 遲啲再試下,或者直接搵教練。'
+      : "Sorry, I couldn't cancel that right now 😅 please try again shortly.";
+  }
 
-    // The student explicitly asked to book → just do it (no extra round-trip).
-    if (intent.intent === 'create_booking') {
+  // 4) Reschedule — Phase 1: ask for the new time.
+  if (intent.intent === 'reschedule_booking') {
+    logRoute('reschedule_booking');
+    return lang === 'zh'
+      ? '冇問題 👍 想改去邊一日同幾點？'
+      : 'No problem 👍 which day and time would you like to move it to?';
+  }
+
+  // 5) FAQ — answer from the coach's FAQ/pricing, else offer the menu.
+  if (intent.intent === 'faq') {
+    const faqReply = getFaqReply(coach, text, lang);
+    if (faqReply) {
+      logRoute('faq');
+      return faqReply;
+    }
+    logRoute('faq_no_match');
+    return lang === 'zh'
+      ? '呢方面我可以幫你問返教練 🙏 想預約、查預約，定取消預約？'
+      : 'I can check that with the coach 🙏 meanwhile, book, check, or cancel a session?';
+  }
+
+  // 6) Booking flow — the student gave a time (provide_datetime) or wants to
+  //    book (new_booking).
+  if (intent.intent === 'provide_datetime' || intent.intent === 'new_booking') {
+    if (requestedSlot) {
+      const { startISO, endISO } = requestedSlot;
+
+      if (
+        !isWithinWorkingHours(
+          coach.workingHours,
+          coach.timezone,
+          startISO,
+          endISO,
+        )
+      ) {
+        logRoute('out_of_hours');
+        logger.info(
+          `[WORKING HOURS] Rejected out-of-hours request coach=${coach.coachId} slot=${startISO}`,
+        );
+        return describeWorkingWindow(
+          coach.workingHours,
+          coach.timezone,
+          startISO,
+          lang,
+        );
+      }
+
+      const result = await checkAvailability(
+        startISO,
+        endISO,
+        calendarId,
+        calendarClient,
+      );
+
+      if (!result.available) {
+        logRoute('slot_full');
+        await updateContext(coach.coachId, from, {
+          lastIntent: intent.intent,
+          language: lang,
+        });
+        return lang === 'zh'
+          ? '嗰個時段滿咗 😅 要唔要睇下第個時間？'
+          : 'That time looks full 😅 want me to check another time?';
+      }
+
+      const displayTextEn = formatSlotLabel(startISO, coach.timezone);
+      const displayTextZh = formatSlotLabelZh(startISO, coach.timezone);
+
+      // "我想book 星期三8點" → an explicit booking request → just do it.
+      if (intent.intent === 'new_booking') {
+        logRoute('new_booking_direct');
+        return bookSlot(
+          coach,
+          from,
+          startISO,
+          endISO,
+          { en: displayTextEn, zh: displayTextZh },
+          lang,
+        );
+      }
+
+      // provide_datetime → suggest the slot and ask to confirm.
+      logRoute('provide_datetime_suggest');
+      await updateContext(coach.coachId, from, {
+        lastIntent: 'provide_datetime',
+        lastSuggestedSlot: { startISO, endISO, displayTextEn, displayTextZh },
+        language: lang,
+      });
+      logger.info(
+        `[CONTEXT SAVED] coach=${coach.coachId} phone=${maskPhone(from)} slot=${startISO}`,
+      );
+      return lang === 'zh'
+        ? `${displayTextZh}有位 👍 要幫你預約嗎？`
+        : `${displayTextEn} is available 👍 want me to book it?`;
+    }
+
+    // No concrete time. A bare "我想book" while a slot is pending is a
+    // confirmation; otherwise ask for the day/time.
+    if (intent.intent === 'new_booking' && context?.lastSuggestedSlot) {
+      logRoute('confirm_suggested');
+      const slot = context.lastSuggestedSlot;
       return bookSlot(
         coach,
         from,
-        startISO,
-        endISO,
-        { en: displayTextEn, zh: displayTextZh },
+        slot.startISO,
+        slot.endISO,
+        { en: slot.displayTextEn, zh: slot.displayTextZh },
         lang,
       );
     }
 
-    // Availability question → remember the slot and offer to book it.
-    await updateContext(coach.coachId, from, {
-      lastIntent: 'check_availability',
-      lastSuggestedSlot: { startISO, endISO, displayTextEn, displayTextZh },
-      language: lang,
-    });
-    logger.info(
-      `[CONTEXT SAVED] coach=${coach.coachId} phone=${maskPhone(from)} slot=${startISO}`,
-    );
-    return lang === 'zh'
-      ? `${displayTextZh}有位 👍 要幫你預約嗎？`
-      : `${displayTextEn} is available 👍 want me to book it?`;
+    logRoute('ask_datetime');
+    return askForDayTime(lang);
   }
 
-  // 2) The student is confirming a slot we already suggested (e.g. "yes" /
-  //    "好" / "book it" / a bare create_booking with no new time).
-  if (
-    context?.lastSuggestedSlot &&
-    (intent.intent === 'create_booking' || isConfirmation(text))
-  ) {
+  // 7) Affirmative ("yes" / "好" / "book it") confirming a pending slot, even
+  //    when the model classified the short reply as unknown.
+  if (context?.lastSuggestedSlot && isConfirmation(text)) {
+    logRoute('confirm_suggested');
     const slot = context.lastSuggestedSlot;
-    logger.info(
-      `[CONTEXT USED] coach=${coach.coachId} phone=${maskPhone(from)} slot=${slot.startISO}`,
-    );
     return bookSlot(
       coach,
       from,
@@ -477,28 +633,18 @@ async function buildReply(
     );
   }
 
-  // 3) Scheduling intent but no resolvable time and nothing pending → ask.
-  if (
-    intent.intent === 'check_availability' ||
-    intent.intent === 'create_booking'
-  ) {
-    return askForDayTime(lang);
-  }
-
-  // 4) Reschedule → keep it simple for the MVP: ask for the new time.
-  if (intent.intent === 'reschedule_request') {
-    return lang === 'zh'
-      ? '冇問題 👍 想改去邊一日同幾點？'
-      : 'No problem 👍 which day and time would you like to move it to?';
-  }
-
-  // 5) Unknown intent → try FAQ/pricing, else a friendly nudge.
+  // 8) Unknown — try FAQ, else offer the menu. Never a bare booking prompt.
   const faqReply = getFaqReply(coach, text, lang);
   if (faqReply) {
-    logger.info(`[FAQ] Answered unknown intent for coach=${coach.coachId}.`);
+    logRoute('faq_fallback');
     return faqReply;
   }
+  logRoute('unknown');
+  await updateContext(coach.coachId, from, {
+    lastIntent: 'unknown',
+    language: lang,
+  });
   return lang === 'zh'
-    ? '收到 👍 想預約邊一日同幾點？'
-    : 'Got it 👍 when would you like to train?';
+    ? '收到 👍 你想預約、查預約，定取消預約？'
+    : 'Got it 👍 would you like to book, check, or cancel a session?';
 }

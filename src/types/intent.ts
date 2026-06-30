@@ -4,15 +4,23 @@
  */
 
 export type SchedulingIntent =
-  | 'check_availability'
-  | 'create_booking'
-  | 'reschedule_request'
+  | 'greeting'
+  | 'new_booking'
+  | 'provide_datetime'
+  | 'check_my_booking'
+  | 'cancel_booking'
+  | 'reschedule_booking'
+  | 'faq'
   | 'unknown';
 
 export const SCHEDULING_INTENTS: readonly SchedulingIntent[] = [
-  'check_availability',
-  'create_booking',
-  'reschedule_request',
+  'greeting',
+  'new_booking',
+  'provide_datetime',
+  'check_my_booking',
+  'cancel_booking',
+  'reschedule_booking',
+  'faq',
   'unknown',
 ] as const;
 

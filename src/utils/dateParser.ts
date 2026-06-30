@@ -93,6 +93,34 @@ export function resolveDate(
     }
   }
 
+  // Numeric day/month, e.g. "3/7", "03-07" → 3 July (Hong Kong day/month order).
+  const dm = text.match(/^(\d{1,2})\s*[/.\-]\s*(\d{1,2})$/);
+  if (dm) {
+    const fromDayMonth = buildCalendarDate(
+      Number(dm[1]),
+      Number(dm[2]),
+      base,
+      zone,
+    );
+    if (fromDayMonth) {
+      return fromDayMonth;
+    }
+  }
+
+  // Chinese "7月3日" / "7月3號" → month/day order.
+  const zhDate = text.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*[日號号]?/);
+  if (zhDate) {
+    const fromMonthDay = buildCalendarDate(
+      Number(zhDate[2]),
+      Number(zhDate[1]),
+      base,
+      zone,
+    );
+    if (fromMonthDay) {
+      return fromMonthDay;
+    }
+  }
+
   // Weekday names, optionally prefixed with "next".
   const isNext = /\bnext\b/.test(text);
   const cleaned = text.replace(/\bnext\b/, '').trim();
@@ -102,6 +130,32 @@ export function resolveDate(
   }
 
   return base;
+}
+
+/**
+ * Builds a concrete day from an explicit day + month. Anchors to the current
+ * year, but rolls forward to next year when the date has already passed (so a
+ * student typing "3/7" late in the year still books the upcoming occurrence).
+ * Returns null for invalid day/month combinations.
+ */
+function buildCalendarDate(
+  day: number,
+  month: number,
+  base: DateTime,
+  zone: string,
+): DateTime | null {
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+  let dt = DateTime.fromObject({ year: base.year, month, day }, { zone });
+  if (!dt.isValid) {
+    return null;
+  }
+  dt = dt.startOf('day');
+  if (dt < base) {
+    dt = dt.plus({ years: 1 });
+  }
+  return dt;
 }
 
 /**

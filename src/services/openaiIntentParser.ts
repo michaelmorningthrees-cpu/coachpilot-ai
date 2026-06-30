@@ -11,37 +11,51 @@
  */
 
 import OpenAI from 'openai';
+import { DateTime } from 'luxon';
 import { logger } from './logger';
 import {
   IntentResult,
   SchedulingIntent,
   SCHEDULING_INTENTS,
 } from '../types/intent';
+import { DEFAULT_TIMEZONE } from '../config/googleAuth';
 
 // Provider: OpenRouter (OpenAI-compatible). Model: DeepSeek by default.
 const OPENROUTER_BASE_URL =
   process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1';
 const MODEL = process.env.OPENROUTER_MODEL ?? 'deepseek/deepseek-chat';
 
-const SYSTEM_PROMPT = `You are CoachPilot AI, an AI scheduling assistant for sports coaches.
-Classify WhatsApp messages into scheduling intents only.
-Support Cantonese, Traditional Chinese, English, and HK mixed language.
+const SYSTEM_PROMPT = `You are CoachPilot AI, the message-understanding layer for a sports coach's WhatsApp assistant.
+Read ONE WhatsApp message and classify it. Support Cantonese, Traditional Chinese, English, and HK mixed language.
 Return JSON only. No markdown. No explanation.
 
-Supported intents (use these exact strings):
-- "check_availability": the user is asking whether a time slot is free / available.
-- "create_booking": the user is confirming or requesting to book a specific time.
-- "reschedule_request": the user wants to change or move an existing booking.
-- "unknown": the message is not a scheduling request, or you cannot tell.
+Intents (use these EXACT strings):
+- "greeting": a greeting or small talk with no scheduling content. Examples: "hello", "hi", "你好", "early", "在嗎".
+- "new_booking": the user wants to book/train but has NOT given a concrete day AND time yet. Examples: "我想book", "book堂", "想訓練", "想約堂".
+- "provide_datetime": the user is giving a concrete day and/or time (often answering "when?"). Examples: "3/7 8pm", "星期三晚上8點", "聽日7點", "下星期一 6-7pm".
+- "check_my_booking": the user is asking about THEIR existing booking. Examples: "我宜家book左邊日", "我book咗邊日", "我有冇預約", "查預約", "我約咗幾時".
+- "cancel_booking": the user wants to cancel an existing booking. Examples: "我想取消", "取消預約", "唔嚟了", "唔約喇", "cancel".
+- "reschedule_booking": the user wants to change/move an existing booking. Examples: "改時間", "改期", "可唔可以改去星期四", "reschedule".
+- "faq": a general question about price, location, duration, etc. Examples: "幾錢", "喺邊度", "幾耐一堂".
+- "unknown": anything else, or you genuinely cannot tell.
 
-Rules:
-- Extract "date" and "time" as short strings, ALWAYS normalised to concise English regardless of the input language (e.g. 星期三 -> "Wednesday", 聽日 -> "tomorrow", 夜晚 -> "evening", 朝早 -> "morning", "7pm", "8-9pm"); use null when not mentioned.
-- "confidence" is a number from 0.0 to 1.0 for your intent classification.
-- "raw_message" must contain the original, unmodified user message.
+Disambiguation:
+- If the message asks WHICH day/time the user already booked (contains 邊日/幾時/有冇 with book/預約/約), it is "check_my_booking", NOT "new_booking".
+- If the message contains a concrete day/time, prefer "provide_datetime" (unless it is clearly a cancel/reschedule/check).
+- A bare greeting is NEVER a booking.
 
-Output JSON schema (and nothing else):
+Date/time extraction:
+- "date":
+  - Relative days stay as concise English words: 聽日 -> "tomorrow", 今日 -> "today", 後日 -> "day after tomorrow", 星期三 -> "Wednesday", 下星期一 -> "next Monday".
+  - A SPECIFIC calendar date MUST be ISO "YYYY-MM-DD" using the CURRENT DATE given below. Treat ambiguous numeric dates as DAY/MONTH (Hong Kong): "3/7" -> "2026-07-03", "7月3日" -> "2026-07-03", "Jul 3" -> "2026-07-03".
+  - null when no date is mentioned.
+- "time": short English string (e.g. "7pm", "8-9pm", "evening", "morning"); null when not mentioned.
+- "confidence": 0.0–1.0 for your classification.
+- "raw_message": the original, unmodified user message.
+
+Output JSON (and nothing else):
 {
-  "intent": "check_availability | create_booking | reschedule_request | unknown",
+  "intent": "greeting | new_booking | provide_datetime | check_my_booking | cancel_booking | reschedule_booking | faq | unknown",
   "date": string | null,
   "time": string | null,
   "confidence": number,
@@ -162,12 +176,18 @@ function cleanJsonResponse(content: string): string {
 async function requestIntent(message: string): Promise<IntentResult | null> {
   logger.info(`[OPENROUTER REQUEST] model=${MODEL} message="${message}"`);
 
+  // Give the model the current date so it can resolve concrete dates like
+  // "3/7" or "7月3日" to ISO, and relative ones like "tomorrow" correctly.
+  const now = DateTime.now().setZone(DEFAULT_TIMEZONE);
+  const dateContext = `CURRENT DATE: ${now.toFormat('yyyy-MM-dd')} (${now.toFormat('cccc')}), timezone ${DEFAULT_TIMEZONE}.`;
+
   const completion = await getClient().chat.completions.create({
     model: MODEL,
     temperature: 0,
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: dateContext },
       { role: 'user', content: message },
     ],
   });
@@ -209,7 +229,7 @@ export async function parseIntent(message: string): Promise<IntentResult> {
       const result = await requestIntent(trimmed);
       if (result) {
         logger.info(
-          `[INTENT PARSED] intent=${result.intent} confidence=${result.confidence} date=${result.date ?? 'null'} time=${result.time ?? 'null'}`,
+          `[INTENT] message="${trimmed}" intent=${result.intent} confidence=${result.confidence} date=${result.date ?? 'null'} time=${result.time ?? 'null'}`,
         );
         return result;
       }

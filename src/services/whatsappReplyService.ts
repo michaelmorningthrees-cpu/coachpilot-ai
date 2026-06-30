@@ -135,11 +135,11 @@ function replyForReschedule(availability?: CheckAvailabilityResult): string {
  */
 export function generateReply(input: GenerateReplyInput): string {
   switch (input.intent) {
-    case 'check_availability':
+    case 'provide_datetime':
       return replyForAvailability(input.availability);
-    case 'create_booking':
+    case 'new_booking':
       return replyForBooking(input.booking);
-    case 'reschedule_request':
+    case 'reschedule_booking':
       return replyForReschedule(input.availability);
     default:
       return 'Hi 🏀 when would you like to train? I can check the schedule for you 👍';

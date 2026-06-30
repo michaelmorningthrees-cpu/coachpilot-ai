@@ -28,11 +28,21 @@ export interface SuggestedSlot {
   displayTextZh: string;
 }
 
+/** A booking we actually created, remembered so the student can cancel it. */
+export interface BookedSlot {
+  eventId: string;
+  startISO: string;
+  endISO: string;
+  displayTextEn: string;
+  displayTextZh: string;
+}
+
 export interface ConversationContext {
   coachId: string;
   studentPhone: string;
   lastIntent: string;
   lastSuggestedSlot: SuggestedSlot | null;
+  lastBooking: BookedSlot | null;
   language: Language;
   updatedAt: string;
   expiresAt: string;
@@ -142,6 +152,7 @@ export async function updateContext(
       studentPhone,
       lastIntent: existing?.lastIntent ?? '',
       lastSuggestedSlot: existing?.lastSuggestedSlot ?? null,
+      lastBooking: existing?.lastBooking ?? null,
       language: existing?.language ?? 'en',
       ...partialContext,
       updatedAt: now.toISO() ?? new Date().toISOString(),

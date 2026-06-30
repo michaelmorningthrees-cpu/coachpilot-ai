@@ -423,6 +423,36 @@ async function createBookingFromInput(
 }
 
 /**
+ * Cancels (deletes) a previously created booking by its calendar event id.
+ * Never throws — failures are returned as `{ success: false, reason }`.
+ * Treats a "already gone" (404/410) event as a success since the end state
+ * the student wants (no booking) is achieved.
+ */
+export async function cancelBooking(
+  eventId: string,
+  calendarIdArg?: string,
+  clientArg?: calendar_v3.Calendar,
+): Promise<{ success: boolean; reason?: string }> {
+  const calendarId = calendarIdArg ?? getCalendarId();
+  try {
+    const client = clientArg ?? getCalendarClient();
+    await client.events.delete({ calendarId, eventId });
+    logger.info(`Booking cancelled: ${eventId} (calendar=${calendarId}).`);
+    return { success: true };
+  } catch (error) {
+    const status = (error as { code?: number; response?: { status?: number } })
+      ?.code ??
+      (error as { response?: { status?: number } })?.response?.status;
+    if (status === 404 || status === 410) {
+      logger.info(`Booking already absent: ${eventId}; treating as cancelled.`);
+      return { success: true };
+    }
+    logger.error('cancelBooking failed.', error);
+    return { success: false, reason: 'Unexpected error while cancelling booking.' };
+  }
+}
+
+/**
  * Creates a booking with two supported call styles:
  *   1. createBooking({ date, time, ... }) → fuzzy intent input
  *      (returns the detailed `CreateBookingResult`).
