@@ -43,6 +43,12 @@ export interface ConversationContext {
   lastIntent: string;
   lastSuggestedSlot: SuggestedSlot | null;
   lastBooking: BookedSlot | null;
+  /** Day the student last mentioned, kept so a time-only follow-up can reuse it. */
+  pendingDate: string | null;
+  /** Time the student last mentioned, kept for a date-only follow-up. */
+  pendingTime: string | null;
+  /** True between a "reschedule" request and the next concrete time. */
+  pendingReschedule: boolean;
   language: Language;
   updatedAt: string;
   expiresAt: string;
@@ -153,6 +159,9 @@ export async function updateContext(
       lastIntent: existing?.lastIntent ?? '',
       lastSuggestedSlot: existing?.lastSuggestedSlot ?? null,
       lastBooking: existing?.lastBooking ?? null,
+      pendingDate: existing?.pendingDate ?? null,
+      pendingTime: existing?.pendingTime ?? null,
+      pendingReschedule: existing?.pendingReschedule ?? false,
       language: existing?.language ?? 'en',
       ...partialContext,
       updatedAt: now.toISO() ?? new Date().toISOString(),

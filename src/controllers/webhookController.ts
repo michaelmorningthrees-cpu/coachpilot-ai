@@ -351,6 +351,16 @@ function askForDayTime(language: 'zh' | 'en'): string {
 }
 
 /**
+ * Asks only for the time, used when we already know the day (so the student
+ * does not have to repeat the date).
+ */
+function askForTime(language: 'zh' | 'en'): string {
+  return language === 'zh'
+    ? '嗰日想幾點呢？例如「8pm」或「7-8pm」'
+    : 'What time that day? e.g. "8pm" or "7-8pm"';
+}
+
+/**
  * Creates the calendar event for a concrete slot and returns a confirmation
  * reply. Clears the pending suggested slot on success.
  */
@@ -376,10 +386,13 @@ async function bookSlot(
 
   if (booking.success) {
     // Remember the created event so a later "取消" / "cancel" can undo it,
-    // and clear the pending suggestion in the same write.
+    // and clear the pending suggestion / partial slot in the same write.
     await updateContext(coach.coachId, from, {
       lastIntent: 'new_booking',
       lastSuggestedSlot: null,
+      pendingDate: null,
+      pendingTime: null,
+      pendingReschedule: false,
       lastBooking: booking.eventId
         ? {
             eventId: booking.eventId,
@@ -425,18 +438,18 @@ async function buildReply(
     ? 'zh'
     : (context?.language ?? language);
 
-  // A concrete slot the student named *in this message* (e.g. "Wednesday 8pm").
-  const requestedSlot = resolveSlot(
-    intent.date,
-    intent.time,
-    undefined,
-    coach.timezone,
-  );
-
   const logRoute = (route: string): void =>
     logger.info(
       `[ROUTE] coach=${coach.coachId} intent=${intent.intent} route=${route}`,
     );
+
+  // Resets the multi-turn slot/reschedule memory — used whenever the latest
+  // message clearly starts a different action (greeting, check, cancel…).
+  const clearedPending = {
+    pendingDate: null,
+    pendingTime: null,
+    pendingReschedule: false,
+  };
 
   // 1) Greeting / small talk — never start a booking flow, and ignore any
   //    stale pending slot (the latest message wins).
@@ -444,6 +457,7 @@ async function buildReply(
     logRoute('greeting');
     await updateContext(coach.coachId, from, {
       lastIntent: 'greeting',
+      ...clearedPending,
       language: lang,
     });
     return lang === 'zh'
@@ -458,6 +472,7 @@ async function buildReply(
     const booked = context?.lastBooking ?? null;
     await updateContext(coach.coachId, from, {
       lastIntent: 'check_my_booking',
+      ...clearedPending,
       language: lang,
     });
     if (booked) {
@@ -477,6 +492,7 @@ async function buildReply(
     if (!booked) {
       await updateContext(coach.coachId, from, {
         lastIntent: 'cancel_booking',
+        ...clearedPending,
         language: lang,
       });
       return lang === 'zh'
@@ -489,6 +505,7 @@ async function buildReply(
       await updateContext(coach.coachId, from, {
         lastIntent: 'cancel_booking',
         lastBooking: null,
+        ...clearedPending,
         language: lang,
       });
       logger.info(
@@ -503,9 +520,17 @@ async function buildReply(
       : "Sorry, I couldn't cancel that right now 😅 please try again shortly.";
   }
 
-  // 4) Reschedule — Phase 1: ask for the new time.
+  // 4) Reschedule — remember we're rescheduling so the next concrete time
+  //    replaces the existing booking (instead of adding a second one).
   if (intent.intent === 'reschedule_booking') {
     logRoute('reschedule_booking');
+    await updateContext(coach.coachId, from, {
+      lastIntent: 'reschedule_booking',
+      pendingDate: null,
+      pendingTime: null,
+      pendingReschedule: true,
+      language: lang,
+    });
     return lang === 'zh'
       ? '冇問題 👍 想改去邊一日同幾點？'
       : 'No problem 👍 which day and time would you like to move it to?';
@@ -525,8 +550,21 @@ async function buildReply(
   }
 
   // 6) Booking flow — the student gave a time (provide_datetime) or wants to
-  //    book (new_booking).
+  //    book (new_booking). Merge with any day/time remembered from earlier
+  //    turns so a follow-up like "10-11am" reuses the previously named day.
   if (intent.intent === 'provide_datetime' || intent.intent === 'new_booking') {
+    const effDate = intent.date ?? context?.pendingDate ?? undefined;
+    const effTime = intent.time ?? context?.pendingTime ?? undefined;
+    const rescheduling = Boolean(
+      context?.pendingReschedule && context?.lastBooking,
+    );
+    const requestedSlot = resolveSlot(
+      effDate,
+      effTime,
+      undefined,
+      coach.timezone,
+    );
+
     if (requestedSlot) {
       const { startISO, endISO } = requestedSlot;
 
@@ -542,6 +580,13 @@ async function buildReply(
         logger.info(
           `[WORKING HOURS] Rejected out-of-hours request coach=${coach.coachId} slot=${startISO}`,
         );
+        // Keep the day (and reschedule flag) so a new time same-day works.
+        await updateContext(coach.coachId, from, {
+          lastIntent: intent.intent,
+          pendingDate: effDate ?? null,
+          pendingTime: null,
+          language: lang,
+        });
         return describeWorkingWindow(
           coach.workingHours,
           coach.timezone,
@@ -561,6 +606,8 @@ async function buildReply(
         logRoute('slot_full');
         await updateContext(coach.coachId, from, {
           lastIntent: intent.intent,
+          pendingDate: effDate ?? null,
+          pendingTime: null,
           language: lang,
         });
         return lang === 'zh'
@@ -571,9 +618,20 @@ async function buildReply(
       const displayTextEn = formatSlotLabel(startISO, coach.timezone);
       const displayTextZh = formatSlotLabelZh(startISO, coach.timezone);
 
-      // "我想book 星期三8點" → an explicit booking request → just do it.
-      if (intent.intent === 'new_booking') {
-        logRoute('new_booking_direct');
+      // Rescheduling or an explicit "我想book …" → book it directly. When
+      // rescheduling, cancel the previous booking first so it's a move.
+      if (rescheduling || intent.intent === 'new_booking') {
+        if (rescheduling && context?.lastBooking) {
+          const cancelOld = await cancelBooking(
+            context.lastBooking.eventId,
+            calendarId,
+            calendarClient,
+          );
+          logger.info(
+            `[RESCHEDULE] coach=${coach.coachId} phone=${maskPhone(from)} cancelledOld=${cancelOld.success} old=${context.lastBooking.eventId}`,
+          );
+        }
+        logRoute(rescheduling ? 'reschedule_book' : 'new_booking_direct');
         return bookSlot(
           coach,
           from,
@@ -589,6 +647,8 @@ async function buildReply(
       await updateContext(coach.coachId, from, {
         lastIntent: 'provide_datetime',
         lastSuggestedSlot: { startISO, endISO, displayTextEn, displayTextZh },
+        pendingDate: null,
+        pendingTime: null,
         language: lang,
       });
       logger.info(
@@ -599,8 +659,20 @@ async function buildReply(
         : `${displayTextEn} is available 👍 want me to book it?`;
     }
 
-    // No concrete time. A bare "我想book" while a slot is pending is a
-    // confirmation; otherwise ask for the day/time.
+    // We have a day but no concrete time yet → remember the day and ask only
+    // for the time (so the student doesn't repeat the date).
+    if (effDate && !effTime) {
+      logRoute('ask_time');
+      await updateContext(coach.coachId, from, {
+        lastIntent: intent.intent,
+        pendingDate: effDate,
+        pendingTime: null,
+        language: lang,
+      });
+      return askForTime(lang);
+    }
+
+    // A bare "我想book" while a slot is pending is a confirmation.
     if (intent.intent === 'new_booking' && context?.lastSuggestedSlot) {
       logRoute('confirm_suggested');
       const slot = context.lastSuggestedSlot;
@@ -642,6 +714,7 @@ async function buildReply(
   logRoute('unknown');
   await updateContext(coach.coachId, from, {
     lastIntent: 'unknown',
+    ...clearedPending,
     language: lang,
   });
   return lang === 'zh'
